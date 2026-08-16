@@ -3,8 +3,26 @@ import Combine
 
 @MainActor
 public final class HarnessController: ObservableObject {
-    public static let defaultModel = "gpt-5.6-luna"
-    public static let defaultEffort = "xhigh"
+    public static let defaultModel = HarnessThread.defaultModel
+    public static let defaultEffort = HarnessThread.defaultReasoningEffort
+    // These IDs and effort values are the choices exposed by the installed
+    // Codex 0.146.1 app-server catalog. The server accepts them as strings in
+    // both thread/start and turn/start.
+    public static let supportedModels = [
+        "gpt-5.6-luna",
+        "gpt-5.6-terra",
+        "gpt-5.6-sol"
+    ]
+    public static let supportedEfforts = ["high", "xhigh", "max"]
+
+    public static func modelNickname(_ model: String) -> String {
+        switch model {
+        case "gpt-5.6-luna": "luna"
+        case "gpt-5.6-terra": "terra"
+        case "gpt-5.6-sol": "sol"
+        default: model
+        }
+    }
 
     public enum ServerState: Equatable {
         case starting
@@ -128,6 +146,22 @@ public final class HarnessController: ObservableObject {
         }
     }
 
+    public func updateModel(_ model: String, reasoningEffort: String, for id: UUID) {
+        guard Self.supportedModels.contains(model), Self.supportedEfforts.contains(reasoningEffort) else {
+            lastError = "このモデルまたは推論レベルは利用できません。"
+            return
+        }
+        do {
+            try store.update(id) { thread in
+                thread.model = model
+                thread.reasoningEffort = reasoningEffort
+            }
+            objectWillChange.send()
+        } catch {
+            report(error)
+        }
+    }
+
     public func saveThread(_ id: UUID) {
         do {
             try store.saveThread(id)
@@ -170,6 +204,31 @@ public final class HarnessController: ObservableObject {
 
     public func opacity(for thread: HarnessThread, now: Date = Date()) -> Double {
         store.opacity(for: thread, now: now)
+    }
+
+    static func threadStartParameters(for thread: HarnessThread) -> [String: Any] {
+        [
+            "model": thread.model,
+            "cwd": thread.workingDirectory,
+            "approvalPolicy": "never",
+            "sandbox": "workspace-write",
+            "serviceName": "tiny_harness_gui"
+        ]
+    }
+
+    static func turnStartParameters(
+        threadID: String,
+        text: String,
+        thread: HarnessThread
+    ) -> [String: Any] {
+        [
+            "threadId": threadID,
+            "input": [["type": "text", "text": text]],
+            "cwd": thread.workingDirectory,
+            "approvalPolicy": "never",
+            "model": thread.model,
+            "effort": thread.reasoningEffort
+        ]
     }
 
     private func bootSequence() async {
@@ -284,13 +343,7 @@ public final class HarnessController: ObservableObject {
             if thread.codexThreadID == nil {
                 let response = try await client.request(
                     method: "thread/start",
-                    params: [
-                        "model": Self.defaultModel,
-                        "cwd": thread.workingDirectory,
-                        "approvalPolicy": "never",
-                        "sandbox": "workspace-write",
-                        "serviceName": "tiny_harness_gui"
-                    ]
+                    params: Self.threadStartParameters(for: thread)
                 )
                 guard
                     let resultThread = response["thread"] as? [String: Any],
@@ -326,14 +379,11 @@ public final class HarnessController: ObservableObject {
 
             let response = try await client.request(
                 method: "turn/start",
-                params: [
-                    "threadId": codexThreadID,
-                    "input": [["type": "text", "text": text]],
-                    "cwd": thread.workingDirectory,
-                    "approvalPolicy": "never",
-                    "model": Self.defaultModel,
-                    "effort": Self.defaultEffort
-                ]
+                params: Self.turnStartParameters(
+                    threadID: codexThreadID,
+                    text: text,
+                    thread: thread
+                )
             )
             guard
                 let turn = response["turn"] as? [String: Any],

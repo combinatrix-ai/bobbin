@@ -44,11 +44,16 @@ public enum HarnessThreadStatus: String, Codable, Sendable {
 }
 
 public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
+    public static let defaultModel = "gpt-5.6-luna"
+    public static let defaultReasoningEffort = "xhigh"
+
     public let id: UUID
     public var codexThreadID: String?
     public var activeTurnID: String?
     public var title: String
     public var workingDirectory: String
+    public var model: String
+    public var reasoningEffort: String
     public var lastConversationAt: Date
     public var savedAt: Date?
     public var status: HarnessThreadStatus
@@ -60,6 +65,8 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         activeTurnID: String? = nil,
         title: String = "New thread",
         workingDirectory: String,
+        model: String = Self.defaultModel,
+        reasoningEffort: String = Self.defaultReasoningEffort,
         lastConversationAt: Date = Date(),
         savedAt: Date? = nil,
         status: HarnessThreadStatus = .idle,
@@ -70,6 +77,8 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         self.activeTurnID = activeTurnID
         self.title = title
         self.workingDirectory = workingDirectory
+        self.model = model
+        self.reasoningEffort = reasoningEffort
         self.lastConversationAt = lastConversationAt
         self.savedAt = savedAt
         self.status = status
@@ -77,6 +86,36 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     }
 
     public var isSaved: Bool { savedAt != nil }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case codexThreadID
+        case activeTurnID
+        case title
+        case workingDirectory
+        case model
+        case reasoningEffort
+        case lastConversationAt
+        case savedAt
+        case status
+        case messages
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        codexThreadID = try container.decodeIfPresent(String.self, forKey: .codexThreadID)
+        activeTurnID = try container.decodeIfPresent(String.self, forKey: .activeTurnID)
+        title = try container.decode(String.self, forKey: .title)
+        workingDirectory = try container.decode(String.self, forKey: .workingDirectory)
+        model = try container.decodeIfPresent(String.self, forKey: .model) ?? Self.defaultModel
+        reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
+            ?? Self.defaultReasoningEffort
+        lastConversationAt = try container.decode(Date.self, forKey: .lastConversationAt)
+        savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt)
+        status = try container.decode(HarnessThreadStatus.self, forKey: .status)
+        messages = try container.decode([ChatMessage].self, forKey: .messages)
+    }
 }
 
 public struct PersistedState: Codable, Equatable, Sendable {

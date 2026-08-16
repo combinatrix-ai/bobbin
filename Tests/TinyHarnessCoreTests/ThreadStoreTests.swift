@@ -81,6 +81,72 @@ final class ThreadStoreTests: XCTestCase {
         XCTAssertFalse(rawState.contains("OPENAI_API_KEY"))
         XCTAssertFalse(rawState.contains("sk-"))
     }
+
+    @MainActor
+    func testThreadModelDefaultsAndSelectionPersist() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+        XCTAssertEqual(thread.model, HarnessThread.defaultModel)
+        XCTAssertEqual(thread.reasoningEffort, HarnessThread.defaultReasoningEffort)
+
+        try fixture.store.update(thread.id) {
+            $0.model = "gpt-5.6-terra"
+            $0.reasoningEffort = "high"
+        }
+
+        let reloaded = try ThreadStore(paths: fixture.paths)
+        let selected = try XCTUnwrap(reloaded.state.threads.first)
+        XCTAssertEqual(selected.model, "gpt-5.6-terra")
+        XCTAssertEqual(selected.reasoningEffort, "high")
+    }
+
+    @MainActor
+    func testLegacyThreadDefaultsMissingModelSelection() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        _ = try fixture.store.createThread(workingDirectory: "/tmp/project")
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(contentsOf: fixture.paths.stateFile)
+            ) as? [String: Any]
+        )
+        var threads = try XCTUnwrap(object["threads"] as? [[String: Any]])
+        threads[0].removeValue(forKey: "model")
+        threads[0].removeValue(forKey: "reasoningEffort")
+        object["threads"] = threads
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+        try legacyData.write(to: fixture.paths.stateFile, options: .atomic)
+
+        let reloaded = try ThreadStore(paths: fixture.paths)
+        let selected = try XCTUnwrap(reloaded.state.threads.first)
+        XCTAssertEqual(selected.model, HarnessThread.defaultModel)
+        XCTAssertEqual(selected.reasoningEffort, HarnessThread.defaultReasoningEffort)
+    }
+
+    @MainActor
+    func testModelSelectionIsForwardedToAppServerRequests() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        var thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+        thread.model = "gpt-5.6-sol"
+        thread.reasoningEffort = "max"
+
+        let start = HarnessController.threadStartParameters(for: thread)
+        XCTAssertEqual(start["model"] as? String, "gpt-5.6-sol")
+
+        let turn = HarnessController.turnStartParameters(
+            threadID: "codex-thread",
+            text: "hello",
+            thread: thread
+        )
+        XCTAssertEqual(turn["model"] as? String, "gpt-5.6-sol")
+        XCTAssertEqual(turn["effort"] as? String, "max")
+        XCTAssertEqual(turn["threadId"] as? String, "codex-thread")
+    }
 }
 
 private struct Fixture {

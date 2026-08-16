@@ -383,7 +383,10 @@ private struct ConversationView: View {
                     thread: thread,
                     save: { controller.saveThread(thread.id) },
                     back: back,
-                    chooseFolder: { chooseFolder(for: thread) }
+                    chooseFolder: { chooseFolder(for: thread) },
+                    selectModel: { model, effort in
+                        controller.updateModel(model, reasoningEffort: effort, for: thread.id)
+                    }
                 )
 
                 if case .stopped(let detail) = controller.serverState {
@@ -500,6 +503,7 @@ private struct ConversationHeader: View {
     let save: () -> Void
     let back: () -> Void
     let chooseFolder: () -> Void
+    let selectModel: (String, String) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -545,10 +549,7 @@ private struct ConversationHeader: View {
                 .accessibilityLabel("作業フォルダ: \(thread.workingDirectory)")
 
                 Spacer(minLength: 3)
-                Text("luna · xhigh")
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .help("gpt-5.6-luna · reasoning xhigh")
+                ModelPicker(thread: thread, select: selectModel)
             }
             .padding(.horizontal, 13)
             .frame(height: 24)
@@ -557,6 +558,64 @@ private struct ConversationHeader: View {
 
     private var folderName: String {
         URL(fileURLWithPath: thread.workingDirectory).lastPathComponent
+    }
+}
+
+private struct ModelPicker: View {
+    let thread: HarnessThread
+    let select: (String, String) -> Void
+
+    var body: some View {
+        Menu {
+            Section("モデル") {
+                ForEach(HarnessController.supportedModels, id: \.self) { model in
+                    Button {
+                        select(model, thread.reasoningEffort)
+                    } label: {
+                        choiceLabel(
+                            HarnessController.modelNickname(model),
+                            selected: model == thread.model
+                        )
+                    }
+                }
+            }
+
+            Section("推論") {
+                ForEach(HarnessController.supportedEfforts, id: \.self) { effort in
+                    Button {
+                        select(thread.model, effort)
+                    } label: {
+                        choiceLabel(effort, selected: effort == thread.reasoningEffort)
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 3) {
+                Text("\(HarnessController.modelNickname(thread.model)) · \(thread.reasoningEffort)")
+                    .font(.system(size: 9.5, design: .monospaced))
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 7, weight: .semibold))
+            }
+            .foregroundStyle(.tertiary)
+            .padding(.horizontal, 5)
+            .frame(height: 24)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .help("モデル: \(thread.model) · reasoning \(thread.reasoningEffort)")
+        .accessibilityLabel(
+            "モデル \(thread.model)、推論 \(thread.reasoningEffort)。クリックして変更"
+        )
+    }
+
+    private func choiceLabel(_ title: String, selected: Bool) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: "checkmark")
+                .opacity(selected ? 1 : 0)
+                .frame(width: 12)
+            Text(title)
+        }
     }
 }
 
