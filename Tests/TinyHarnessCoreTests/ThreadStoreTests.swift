@@ -331,7 +331,7 @@ final class ThreadStoreTests: XCTestCase {
             XCTAssertNil(turn["sandbox"])
         }
 
-        // Only 自動監査 routes approvals to the review subagent.
+        // Only Auto review routes approvals to the review subagent.
         XCTAssertEqual(
             HarnessReviewMode.allCases.filter { $0.approvalsReviewer == "auto_review" },
             [.autoReview]

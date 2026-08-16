@@ -60,18 +60,18 @@ public enum HarnessReviewMode: String, Codable, CaseIterable, Identifiable, Send
 
     public var displayName: String {
         switch self {
-        case .autoReview: "自動監査"
-        case .allowAll: "全部OK"
-        case .denyAll: "全部拒否"
+        case .autoReview: "Auto review"
+        case .allowAll: "Allow all"
+        case .denyAll: "Deny all"
         }
     }
 
     /// One short line that makes the choice understandable without a manual.
     public var summary: String {
         switch self {
-        case .autoReview: "エスカレーションを自動で審査"
-        case .allowAll: "確認なし・サンドボックス解除"
-        case .denyAll: "エスカレーションを常に拒否"
+        case .autoReview: "Escalations judged automatically"
+        case .allowAll: "Never asks, sandbox off"
+        case .denyAll: "Escalations always denied"
         }
     }
 

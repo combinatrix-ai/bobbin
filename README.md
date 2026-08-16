@@ -10,9 +10,9 @@ A minimal macOS menu bar client for Codex app-server. It keeps its conversations
 - Removes `OPENAI_API_KEY` from the app-server environment until the user explicitly opts in.
 - Runs turns with `gpt-5.6-luna` and `xhigh` by default.
 - Gives every thread its own review mode, chosen above the composer and applied from the next turn:
-  - `自動監査` (default) — `approvalPolicy: on-request`, `approvalsReviewer: auto_review`, sandbox `workspace-write`.
-  - `全部OK` — `approvalPolicy: never`, sandbox `danger-full-access`.
-  - `全部拒否` — `approvalPolicy: never`, sandbox `workspace-write`, approvals never routed to the review subagent.
+  - `Auto review` (default) — `approvalPolicy: on-request`, `approvalsReviewer: auto_review`, sandbox `workspace-write`.
+  - `Allow all` — `approvalPolicy: never`, sandbox `danger-full-access`.
+  - `Deny all` — `approvalPolicy: never`, sandbox `workspace-write`, approvals never routed to the review subagent.
 - Sorts unsaved threads by last conversation time and fades them as they age.
 - Permanently deletes unsaved app-server threads after seven days.
 - Moves starred or saved threads to the bottom Saved section and exempts them from cleanup.

@@ -646,9 +646,9 @@ private struct ThreadOptionsRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("承認: \(thread.reviewMode.displayName) — \(thread.reviewMode.summary)")
+            .help("Approvals: \(thread.reviewMode.displayName) — \(thread.reviewMode.summary)")
             .accessibilityLabel(
-                "承認モード \(thread.reviewMode.displayName)、\(thread.reviewMode.summary)。クリックして変更"
+                "Approval mode \(thread.reviewMode.displayName), \(thread.reviewMode.summary). Click to change"
             )
 
             separator
