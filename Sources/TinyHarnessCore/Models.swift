@@ -43,6 +43,18 @@ public enum HarnessThreadStatus: String, Codable, Sendable {
     }
 }
 
+public struct HarnessModelOption: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let displayName: String
+    public let supportedReasoningEfforts: [String]
+
+    public init(id: String, displayName: String, supportedReasoningEfforts: [String]) {
+        self.id = id
+        self.displayName = displayName
+        self.supportedReasoningEfforts = supportedReasoningEfforts
+    }
+}
+
 public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     public static let defaultModel = "gpt-5.6-luna"
     public static let defaultReasoningEffort = "xhigh"
@@ -122,15 +134,42 @@ public struct PersistedState: Codable, Equatable, Sendable {
     public var threads: [HarnessThread]
     public var selectedThreadID: UUID?
     public var lastWorkingDirectory: String?
+    public var defaultModel: String
+    public var defaultReasoningEffort: String
 
     public init(
         threads: [HarnessThread] = [],
         selectedThreadID: UUID? = nil,
-        lastWorkingDirectory: String? = nil
+        lastWorkingDirectory: String? = nil,
+        defaultModel: String = HarnessThread.defaultModel,
+        defaultReasoningEffort: String = HarnessThread.defaultReasoningEffort
     ) {
         self.threads = threads
         self.selectedThreadID = selectedThreadID
         self.lastWorkingDirectory = lastWorkingDirectory
+        self.defaultModel = defaultModel
+        self.defaultReasoningEffort = defaultReasoningEffort
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case threads
+        case selectedThreadID
+        case lastWorkingDirectory
+        case defaultModel
+        case defaultReasoningEffort
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        threads = try container.decode([HarnessThread].self, forKey: .threads)
+        selectedThreadID = try container.decodeIfPresent(UUID.self, forKey: .selectedThreadID)
+        lastWorkingDirectory = try container.decodeIfPresent(String.self, forKey: .lastWorkingDirectory)
+        defaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel)
+            ?? HarnessThread.defaultModel
+        defaultReasoningEffort = try container.decodeIfPresent(
+            String.self,
+            forKey: .defaultReasoningEffort
+        ) ?? HarnessThread.defaultReasoningEffort
     }
 }
 

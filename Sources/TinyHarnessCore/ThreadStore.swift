@@ -53,12 +53,23 @@ public final class ThreadStore: ObservableObject {
 
     @discardableResult
     public func createThread(workingDirectory: String, now: Date = Date()) throws -> HarnessThread {
-        let thread = HarnessThread(workingDirectory: workingDirectory, lastConversationAt: now)
+        let thread = HarnessThread(
+            workingDirectory: workingDirectory,
+            model: state.defaultModel,
+            reasoningEffort: state.defaultReasoningEffort,
+            lastConversationAt: now
+        )
         state.threads.append(thread)
         state.selectedThreadID = thread.id
         state.lastWorkingDirectory = workingDirectory
         try persist()
         return thread
+    }
+
+    public func updateDefaults(model: String, reasoningEffort: String) throws {
+        state.defaultModel = model
+        state.defaultReasoningEffort = reasoningEffort
+        try persist()
     }
 
     public func select(_ id: UUID) throws {

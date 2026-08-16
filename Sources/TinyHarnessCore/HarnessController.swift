@@ -5,16 +5,6 @@ import Combine
 public final class HarnessController: ObservableObject {
     public static let defaultModel = HarnessThread.defaultModel
     public static let defaultEffort = HarnessThread.defaultReasoningEffort
-    // These IDs and effort values are the choices exposed by the installed
-    // Codex 0.146.1 app-server catalog. The server accepts them as strings in
-    // both thread/start and turn/start.
-    public static let supportedModels = [
-        "gpt-5.6-luna",
-        "gpt-5.6-terra",
-        "gpt-5.6-sol"
-    ]
-    public static let supportedEfforts = ["high", "xhigh", "max"]
-
     public static func modelNickname(_ model: String) -> String {
         switch model {
         case "gpt-5.6-luna": "luna"
@@ -54,6 +44,7 @@ public final class HarnessController: ObservableObject {
     @Published public private(set) var serverState: ServerState = .starting
     @Published public private(set) var authState: AuthState = .checking
     @Published public private(set) var modelVerified = false
+    @Published public private(set) var availableModels: [HarnessModelOption] = []
     @Published public private(set) var lastError: String?
 
     public let store: ThreadStore
@@ -92,6 +83,7 @@ public final class HarnessController: ObservableObject {
         serverState = .starting
         authState = .checking
         modelVerified = false
+        availableModels = []
         boot()
     }
 
@@ -147,7 +139,7 @@ public final class HarnessController: ObservableObject {
     }
 
     public func updateModel(_ model: String, reasoningEffort: String, for id: UUID) {
-        guard Self.supportedModels.contains(model), Self.supportedEfforts.contains(reasoningEffort) else {
+        guard reasoningEfforts(for: model).contains(reasoningEffort) else {
             lastError = "このモデルまたは推論レベルは利用できません。"
             return
         }
@@ -160,6 +152,25 @@ public final class HarnessController: ObservableObject {
         } catch {
             report(error)
         }
+    }
+
+    public func updateDefaultModel(_ model: String) {
+        guard let option = availableModels.first(where: { $0.id == model }) else { return }
+        let currentEffort = store.state.defaultReasoningEffort
+        let effort = option.supportedReasoningEfforts.contains(currentEffort)
+            ? currentEffort
+            : preferredEffort(in: option.supportedReasoningEfforts)
+        updateDefaults(model: model, reasoningEffort: effort)
+    }
+
+    public func updateDefaultReasoningEffort(_ effort: String) {
+        let model = store.state.defaultModel
+        guard reasoningEfforts(for: model).contains(effort) else { return }
+        updateDefaults(model: model, reasoningEffort: effort)
+    }
+
+    public func reasoningEfforts(for model: String) -> [String] {
+        availableModels.first(where: { $0.id == model })?.supportedReasoningEfforts ?? []
     }
 
     public func saveThread(_ id: UUID) {
@@ -244,7 +255,7 @@ public final class HarnessController: ObservableObject {
             try await client.start()
             serverState = .ready
 
-            try await verifyDefaultModel(using: client)
+            try await loadModelCatalog(using: client)
             await cleanupExpiredThreads(using: client)
             try await resolveAuthentication(using: client)
         } catch {
@@ -254,7 +265,7 @@ public final class HarnessController: ObservableObject {
         }
     }
 
-    private func verifyDefaultModel(using client: CodexAppServerClient) async throws {
+    private func loadModelCatalog(using client: CodexAppServerClient) async throws {
         let response = try await client.request(
             method: "model/list",
             params: ["limit": 100, "includeHidden": true]
@@ -262,16 +273,59 @@ public final class HarnessController: ObservableObject {
         guard let models = response["data"] as? [[String: Any]] else {
             throw HarnessError.malformedResponse("model/list.data")
         }
-        guard let model = models.first(where: {
-            ($0["id"] as? String) == Self.defaultModel || ($0["model"] as? String) == Self.defaultModel
-        }) else {
-            throw HarnessError.modelUnavailable(Self.defaultModel)
-        }
-        let efforts = model["supportedReasoningEfforts"] as? [[String: Any]] ?? []
-        guard efforts.contains(where: { ($0["reasoningEffort"] as? String) == Self.defaultEffort }) else {
-            throw HarnessError.modelUnavailable(Self.defaultModel)
+        let catalog = Self.modelOptions(from: models)
+        guard !catalog.isEmpty else { throw HarnessError.malformedResponse("model/list.data") }
+        availableModels = catalog
+
+        let storedModel = store.state.defaultModel
+        let selected = catalog.first(where: { $0.id == storedModel })
+            ?? catalog.first(where: { $0.id == Self.defaultModel })
+            ?? catalog[0]
+        let storedEffort = store.state.defaultReasoningEffort
+        let selectedEffort = selected.supportedReasoningEfforts.contains(storedEffort)
+            ? storedEffort
+            : preferredEffort(in: selected.supportedReasoningEfforts)
+        if selected.id != storedModel || selectedEffort != storedEffort {
+            try store.updateDefaults(model: selected.id, reasoningEffort: selectedEffort)
         }
         modelVerified = true
+    }
+
+    static func modelOptions(from values: [[String: Any]]) -> [HarnessModelOption] {
+        values.compactMap(Self.modelOption(from:))
+    }
+
+    private static func modelOption(from value: [String: Any]) -> HarnessModelOption? {
+        guard let id = (value["id"] as? String) ?? (value["model"] as? String) else { return nil }
+        let objects = value["supportedReasoningEfforts"] as? [[String: Any]] ?? []
+        var efforts = objects.compactMap { $0["reasoningEffort"] as? String }
+        if efforts.isEmpty {
+            efforts = value["supportedReasoningEfforts"] as? [String] ?? []
+        }
+        guard !efforts.isEmpty else { return nil }
+        let displayName = (value["displayName"] as? String) ?? id
+        let uniqueEfforts = efforts.reduce(into: [String]()) { result, effort in
+            if !result.contains(effort) { result.append(effort) }
+        }
+        return HarnessModelOption(
+            id: id,
+            displayName: displayName,
+            supportedReasoningEfforts: uniqueEfforts
+        )
+    }
+
+    private func preferredEffort(in efforts: [String]) -> String {
+        if efforts.contains(Self.defaultEffort) { return Self.defaultEffort }
+        return efforts.first ?? Self.defaultEffort
+    }
+
+    private func updateDefaults(model: String, reasoningEffort: String) {
+        do {
+            try store.updateDefaults(model: model, reasoningEffort: reasoningEffort)
+            objectWillChange.send()
+        } catch {
+            report(error)
+        }
     }
 
     private func resolveAuthentication(using client: CodexAppServerClient) async throws {

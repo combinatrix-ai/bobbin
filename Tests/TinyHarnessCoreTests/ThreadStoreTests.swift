@@ -103,6 +103,45 @@ final class ThreadStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testDefaultSelectionPersistsAndAppliesToNewThreads() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        try fixture.store.updateDefaults(model: "gpt-5.6-terra", reasoningEffort: "max")
+        let thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+        XCTAssertEqual(thread.model, "gpt-5.6-terra")
+        XCTAssertEqual(thread.reasoningEffort, "max")
+
+        let reloaded = try ThreadStore(paths: fixture.paths)
+        XCTAssertEqual(reloaded.state.defaultModel, "gpt-5.6-terra")
+        XCTAssertEqual(reloaded.state.defaultReasoningEffort, "max")
+    }
+
+    @MainActor
+    func testModelCatalogUsesAppServerModelsAndEfforts() {
+        let options = HarnessController.modelOptions(from: [
+            [
+                "id": "gpt-5.6-luna",
+                "displayName": "GPT-5.6 Luna",
+                "supportedReasoningEfforts": [
+                    ["reasoningEffort": "high"],
+                    ["reasoningEffort": "xhigh"],
+                    ["reasoningEffort": "xhigh"]
+                ]
+            ],
+            ["id": "no-efforts"]
+        ])
+
+        XCTAssertEqual(options, [
+            HarnessModelOption(
+                id: "gpt-5.6-luna",
+                displayName: "GPT-5.6 Luna",
+                supportedReasoningEfforts: ["high", "xhigh"]
+            )
+        ])
+    }
+
+    @MainActor
     func testLegacyThreadDefaultsMissingModelSelection() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
@@ -117,6 +156,8 @@ final class ThreadStoreTests: XCTestCase {
         threads[0].removeValue(forKey: "model")
         threads[0].removeValue(forKey: "reasoningEffort")
         object["threads"] = threads
+        object.removeValue(forKey: "defaultModel")
+        object.removeValue(forKey: "defaultReasoningEffort")
         let legacyData = try JSONSerialization.data(withJSONObject: object)
         try legacyData.write(to: fixture.paths.stateFile, options: .atomic)
 
@@ -124,6 +165,8 @@ final class ThreadStoreTests: XCTestCase {
         let selected = try XCTUnwrap(reloaded.state.threads.first)
         XCTAssertEqual(selected.model, HarnessThread.defaultModel)
         XCTAssertEqual(selected.reasoningEffort, HarnessThread.defaultReasoningEffort)
+        XCTAssertEqual(reloaded.state.defaultModel, HarnessThread.defaultModel)
+        XCTAssertEqual(reloaded.state.defaultReasoningEffort, HarnessThread.defaultReasoningEffort)
     }
 
     @MainActor

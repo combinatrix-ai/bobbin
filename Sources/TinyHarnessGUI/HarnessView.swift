@@ -156,9 +156,37 @@ private struct ListHeader: View {
             .accessibilityLabel("新しいスレッド")
 
             Menu {
-                Text("認証: \(authenticationLabel)")
-                Text("モデル: luna · xhigh")
+                Section("デフォルトモデル") {
+                    ForEach(controller.availableModels) { option in
+                        Button {
+                            controller.updateDefaultModel(option.id)
+                        } label: {
+                            settingsChoiceLabel(
+                                option.displayName,
+                                selected: option.id == controller.store.state.defaultModel
+                            )
+                        }
+                    }
+                }
+
+                Section("デフォルト推論") {
+                    ForEach(
+                        controller.reasoningEfforts(for: controller.store.state.defaultModel),
+                        id: \.self
+                    ) { effort in
+                        Button {
+                            controller.updateDefaultReasoningEffort(effort)
+                        } label: {
+                            settingsChoiceLabel(
+                                effort,
+                                selected: effort == controller.store.state.defaultReasoningEffort
+                            )
+                        }
+                    }
+                }
+
                 Divider()
+                Text("認証: \(authenticationLabel)")
                 Button("app-serverを再起動", action: controller.restart)
                 Divider()
                 Button("Tiny Harnessを終了") {
@@ -170,6 +198,7 @@ private struct ListHeader: View {
                     .frame(width: 27, height: 27)
             }
             .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
             .help("設定")
             .accessibilityLabel("設定")
@@ -190,6 +219,15 @@ private struct ListHeader: View {
     private var authenticationLabel: String {
         if case .authenticated(let mode) = controller.authState { return mode.rawValue }
         return "未接続"
+    }
+
+    private func settingsChoiceLabel(_ title: String, selected: Bool) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: "checkmark")
+                .opacity(selected ? 1 : 0)
+                .frame(width: 12)
+            Text(title)
+        }
     }
 }
 
@@ -380,6 +418,7 @@ private struct ConversationView: View {
         if let thread {
             VStack(spacing: 0) {
                 ConversationHeader(
+                    controller: controller,
                     thread: thread,
                     save: { controller.saveThread(thread.id) },
                     back: back,
@@ -499,6 +538,7 @@ private struct ConversationView: View {
 }
 
 private struct ConversationHeader: View {
+    @ObservedObject var controller: HarnessController
     let thread: HarnessThread
     let save: () -> Void
     let back: () -> Void
@@ -549,7 +589,7 @@ private struct ConversationHeader: View {
                 .accessibilityLabel("作業フォルダ: \(thread.workingDirectory)")
 
                 Spacer(minLength: 3)
-                ModelPicker(thread: thread, select: selectModel)
+                ModelPicker(controller: controller, thread: thread, select: selectModel)
             }
             .padding(.horizontal, 13)
             .frame(height: 24)
@@ -562,26 +602,30 @@ private struct ConversationHeader: View {
 }
 
 private struct ModelPicker: View {
+    @ObservedObject var controller: HarnessController
     let thread: HarnessThread
     let select: (String, String) -> Void
 
     var body: some View {
         Menu {
             Section("モデル") {
-                ForEach(HarnessController.supportedModels, id: \.self) { model in
+                ForEach(controller.availableModels) { option in
                     Button {
-                        select(model, thread.reasoningEffort)
+                        let effort = option.supportedReasoningEfforts.contains(thread.reasoningEffort)
+                            ? thread.reasoningEffort
+                            : option.supportedReasoningEfforts.first ?? HarnessController.defaultEffort
+                        select(option.id, effort)
                     } label: {
                         choiceLabel(
-                            HarnessController.modelNickname(model),
-                            selected: model == thread.model
+                            HarnessController.modelNickname(option.id),
+                            selected: option.id == thread.model
                         )
                     }
                 }
             }
 
             Section("推論") {
-                ForEach(HarnessController.supportedEfforts, id: \.self) { effort in
+                ForEach(controller.reasoningEfforts(for: thread.model), id: \.self) { effort in
                     Button {
                         select(thread.model, effort)
                     } label: {
@@ -602,6 +646,7 @@ private struct ModelPicker: View {
             .contentShape(Rectangle())
         }
         .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
         .fixedSize()
         .help("モデル: \(thread.model) · reasoning \(thread.reasoningEffort)")
         .accessibilityLabel(
