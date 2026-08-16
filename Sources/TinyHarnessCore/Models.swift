@@ -263,21 +263,21 @@ public enum HarnessError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .codexNotFound:
-            "Codex CLIが見つかりません。~/.local/bin/codex またはPATHを確認してください。"
+            "Codex CLI not found. Check ~/.local/bin/codex or your PATH."
         case .appServerStopped(let detail):
-            detail.isEmpty ? "Codex app-serverが停止しました。" : "Codex app-serverが停止しました: \(detail)"
+            detail.isEmpty ? "Codex app-server stopped." : "Codex app-server stopped: \(detail)"
         case .malformedResponse(let detail):
-            "app-serverから不正な応答を受け取りました: \(detail)"
+            "Malformed response from the app-server: \(detail)"
         case .serverError(_, let message):
             message
         case .missingResult(let method):
-            "\(method) の結果がありません。"
+            "No result for \(method)."
         case .modelUnavailable(let model):
-            "\(model) / xhigh はこのCodex環境で利用できません。"
+            "\(model) / xhigh is unavailable in this Codex environment."
         case .apiKeyUnavailable:
-            "検出したAPI keyを読み出せませんでした。"
+            "Could not read the detected API key."
         case .threadNotFound:
-            "対象のスレッドが見つかりません。"
+            "That thread no longer exists."
         }
     }
 }

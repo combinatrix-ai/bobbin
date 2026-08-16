@@ -100,7 +100,7 @@ public final class HarnessController: ObservableObject {
     public func useAPIKey(_ key: String) {
         let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
-            authState = .failed("API keyを入力してください。")
+            authState = .failed("Enter an API key.")
             return
         }
         Task { await loginWithAPIKey(trimmed) }
@@ -145,7 +145,7 @@ public final class HarnessController: ObservableObject {
 
     public func updateModel(_ model: String, reasoningEffort: String, for id: UUID) {
         guard reasoningEfforts(for: model).contains(reasoningEffort) else {
-            lastError = "このモデルまたは推論レベルは利用できません。"
+            lastError = "That model or reasoning level is unavailable."
             return
         }
         do {
@@ -202,7 +202,7 @@ public final class HarnessController: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         guard authState.isAuthenticated, serverState == .ready, modelVerified else {
-            lastError = "認証とapp-serverの準備が完了していません。"
+            lastError = "Sign-in and the app-server are not ready yet."
             return
         }
 
@@ -523,7 +523,7 @@ public final class HarnessController: ObservableObject {
                 authState = .authenticated(mode)
                 pendingAuthMode = nil
             } else if !success {
-                authState = .failed(params["error"] as? String ?? "認証に失敗しました。")
+                authState = .failed(params["error"] as? String ?? "Sign-in failed.")
             }
 
         case "account/updated":

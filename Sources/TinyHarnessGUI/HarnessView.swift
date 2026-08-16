@@ -152,11 +152,11 @@ private struct ListHeader: View {
             }
             .buttonStyle(.plain)
             .contentShape(Rectangle())
-            .help("新しいスレッド")
-            .accessibilityLabel("新しいスレッド")
+            .help("New thread")
+            .accessibilityLabel("New thread")
 
             Menu {
-                Section("デフォルトモデル") {
+                Section("Default model") {
                     ForEach(controller.availableModels) { option in
                         Button {
                             controller.updateDefaultModel(option.id)
@@ -169,7 +169,7 @@ private struct ListHeader: View {
                     }
                 }
 
-                Section("デフォルト推論") {
+                Section("Default reasoning") {
                     ForEach(
                         controller.reasoningEfforts(for: controller.store.state.defaultModel),
                         id: \.self
@@ -186,10 +186,10 @@ private struct ListHeader: View {
                 }
 
                 Divider()
-                Text("認証: \(authenticationLabel)")
-                Button("app-serverを再起動", action: controller.restart)
+                Text("Auth: \(authenticationLabel)")
+                Button("Restart app-server", action: controller.restart)
                 Divider()
-                Button("Tiny Harnessを終了") {
+                Button("Quit Tiny Harness") {
                     NSApplication.shared.terminate(nil)
                 }
             } label: {
@@ -200,8 +200,8 @@ private struct ListHeader: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("設定")
-            .accessibilityLabel("設定")
+            .help("Settings")
+            .accessibilityLabel("Settings")
         }
         .padding(.horizontal, 12)
         .frame(height: 42)
@@ -218,7 +218,7 @@ private struct ListHeader: View {
 
     private var authenticationLabel: String {
         if case .authenticated(let mode) = controller.authState { return mode.rawValue }
-        return "未接続"
+        return "Not connected"
     }
 
     @ViewBuilder
@@ -240,13 +240,13 @@ private struct ServerBanner: View {
         VStack(spacing: 0) {
             HStack(spacing: 7) {
                 Circle().fill(.red).frame(width: 6, height: 6)
-                Text("サーバー停止")
+                Text("Server stopped")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 if !detail.isEmpty {
-                    Button(showingDetail ? "閉じる" : "詳細") {
+                    Button(showingDetail ? "Hide" : "Details") {
                         withAnimation(.easeOut(duration: 0.12)) {
                             showingDetail.toggle()
                         }
@@ -254,7 +254,7 @@ private struct ServerBanner: View {
                     .font(.system(size: 10, weight: .medium))
                     .buttonStyle(.plain)
                 }
-                Button("再起動", action: restart)
+                Button("Restart", action: restart)
                     .font(.system(size: 10, weight: .semibold))
                     .buttonStyle(.plain)
             }
@@ -289,8 +289,8 @@ private struct EmptyThreadView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("新しいスレッド")
-        .accessibilityLabel("新しいスレッド")
+        .help("New thread")
+        .accessibilityLabel("New thread")
         .frame(maxWidth: .infinity, minHeight: 150)
     }
 }
@@ -303,7 +303,7 @@ private struct SavedSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 6) {
-                Text("保存済み")
+                Text("Saved")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -342,7 +342,7 @@ private struct ThreadRow: View {
                         Circle()
                             .fill(.green)
                             .frame(width: 6, height: 6)
-                            .accessibilityLabel("実行中")
+                            .accessibilityLabel("Running")
                     }
 
                     Text(thread.title)
@@ -376,8 +376,8 @@ private struct ThreadRow: View {
             }
             .buttonStyle(.plain)
             .disabled(thread.isSaved)
-            .help(thread.isSaved ? "保存済み" : "保存して残す")
-            .accessibilityLabel(thread.isSaved ? "保存済み" : "スレッドを保存")
+            .help(thread.isSaved ? "Saved" : "Save and keep")
+            .accessibilityLabel(thread.isSaved ? "Saved" : "Save thread")
         }
         .background(isSelected ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.15) : .clear)
         .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -385,19 +385,19 @@ private struct ThreadRow: View {
     }
 
     private var accessibilityLabel: String {
-        if thread.isSaved { return "\(thread.title)、保存済み" }
-        return "\(thread.title)、\(metadata)"
+        if thread.isSaved { return "\(thread.title), saved" }
+        return "\(thread.title), \(metadata)"
     }
 
     private var metadata: String {
-        if thread.status == .running { return "実行中" }
+        if thread.status == .running { return "Running" }
         let age = max(0, Date().timeIntervalSince(thread.lastConversationAt))
         let remaining = Int(ceil((7 * 24 * 60 * 60 - age) / (24 * 60 * 60)))
-        if remaining <= 2 { return "残り\(max(0, remaining))日" }
-        if age < 60 { return "たった今" }
-        if age < 3_600 { return "\(Int(age / 60))分前" }
-        if age < 86_400 { return "\(Int(age / 3_600))時間前" }
-        return "\(Int(age / 86_400))日前"
+        if remaining <= 2 { return "\(max(0, remaining))d left" }
+        if age < 60 { return "Just now" }
+        if age < 3_600 { return "\(Int(age / 60))m ago" }
+        if age < 86_400 { return "\(Int(age / 3_600))h ago" }
+        return "\(Int(age / 86_400))d ago"
     }
 }
 
@@ -484,7 +484,7 @@ private struct ConversationView: View {
             // prompt and the placeholder share one inset and one baseline. It
             // starts exactly one line tall and grows to `maxComposerLines`
             // before it starts scrolling.
-            TextField("メッセージ", text: $prompt, axis: .vertical)
+            TextField("Message", text: $prompt, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
                 .lineLimit(1...maxComposerLines)
@@ -506,8 +506,8 @@ private struct ConversationView: View {
             .buttonStyle(.plain)
             .disabled(thread.status == .running ? false : isPromptEmpty || controller.serverState != .ready)
             .opacity(thread.status == .running || !isPromptEmpty ? 1 : 0.3)
-            .help(thread.status == .running ? "生成を停止" : "送信")
-            .accessibilityLabel(thread.status == .running ? "生成を停止" : "送信")
+            .help(thread.status == .running ? "Stop generating" : "Send")
+            .accessibilityLabel(thread.status == .running ? "Stop generating" : "Send")
             .keyboardShortcut(.return, modifiers: .command)
         }
         .padding(.horizontal, 10)
@@ -541,7 +541,7 @@ private struct ConversationView: View {
 
     private func chooseFolder(for thread: HarnessThread) {
         let panel = NSOpenPanel()
-        panel.title = "作業フォルダ"
+        panel.title = "Working folder"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -569,8 +569,8 @@ private struct ConversationHeader: View {
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
-                .help("スレッド一覧に戻る")
-                .accessibilityLabel("スレッド一覧に戻る")
+                .help("Back to threads")
+                .accessibilityLabel("Back to threads")
 
                 Text(thread.title)
                     .font(.system(size: 12.5, weight: .semibold))
@@ -586,8 +586,8 @@ private struct ConversationHeader: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(thread.isSaved)
-                .help(thread.isSaved ? "保存済み" : "保存して残す")
-                .accessibilityLabel(thread.isSaved ? "保存済み" : "スレッドを保存")
+                .help(thread.isSaved ? "Saved" : "Save and keep")
+                .accessibilityLabel(thread.isSaved ? "Saved" : "Save thread")
             }
             .padding(.horizontal, 7)
             .frame(height: 40)
@@ -601,7 +601,7 @@ private struct ConversationHeader: View {
                 }
                 .buttonStyle(.plain)
                 .help(thread.workingDirectory)
-                .accessibilityLabel("作業フォルダ: \(thread.workingDirectory)")
+                .accessibilityLabel("Working folder: \(thread.workingDirectory)")
 
                 Spacer(minLength: 3)
                 ThreadOptionsRow(
@@ -673,8 +673,8 @@ private struct ThreadOptionsRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("モデル: \(thread.model)")
-            .accessibilityLabel("モデル \(thread.model)。クリックして変更")
+            .help("Model: \(thread.model)")
+            .accessibilityLabel("Model \(thread.model). Click to change")
 
             separator
 
@@ -692,8 +692,8 @@ private struct ThreadOptionsRow: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("reasoning: \(thread.reasoningEffort)")
-            .accessibilityLabel("推論 \(thread.reasoningEffort)。クリックして変更")
+            .help("Reasoning: \(thread.reasoningEffort)")
+            .accessibilityLabel("Reasoning \(thread.reasoningEffort). Click to change")
         }
         .padding(.horizontal, 5)
     }
@@ -740,7 +740,7 @@ private struct PendingReplyIndicator: View {
         .frame(height: 15)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("応答を待っています")
+        .accessibilityLabel("Waiting for a reply")
         .onAppear { pulsing = true }
     }
 

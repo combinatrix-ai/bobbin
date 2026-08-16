@@ -59,7 +59,7 @@ private struct LoadingView: View {
     var body: some View {
         VStack(spacing: 10) {
             ProgressView().controlSize(.small)
-            Text("準備中")
+            Text("Starting")
                 .font(.system(size: 12.5, weight: .semibold))
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -74,9 +74,9 @@ private struct ServerErrorView: View {
             Circle()
                 .fill(Color.red)
                 .frame(width: 7, height: 7)
-            Text("サーバー停止")
+            Text("Server stopped")
                 .font(.system(size: 13, weight: .semibold))
-            Button("再起動", action: restart)
+            Button("Restart", action: restart)
                 .buttonStyle(.borderedProminent)
                 .controlSize(.small)
         }
