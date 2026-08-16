@@ -5,17 +5,17 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>Tiny Harness</string>
+    <string>Bobbin</string>
     <key>CFBundleExecutable</key>
-    <string>TinyHarnessGUI</string>
+    <string>Bobbin</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
-    <string>com.hmirin.tiny-harness</string>
+    <string>com.hmirin.bobbin</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Tiny Harness</string>
+    <string>Bobbin</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

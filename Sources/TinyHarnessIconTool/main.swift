@@ -7,7 +7,7 @@ import TinyHarnessIcon
 // and the preview sheet can never disagree with each other.
 
 let usage = """
-Usage: tiny-harness-icon <command> [path]
+Usage: bobbin-icon <command> [path]
 
   iconset <dir>    Write the .iconset PNGs iconutil needs for AppIcon.icns
   template <dir>   Write the monochrome menu bar silhouette at @1x and @2x
@@ -130,7 +130,7 @@ func writePreview(to file: URL) throws {
     fill(CGRect(x: 0, y: 0, width: width, height: height), page, radius: 0, in: context)
 
     draw(
-        "Tiny Harness — icon concept A",
+        "Bobbin — icon concept A",
         at: CGPoint(x: 64, y: 58),
         size: 26,
         weight: .semibold,
@@ -261,5 +261,5 @@ do {
     }
     print(target.path)
 } catch {
-    fail("tiny-harness-icon: \(error.localizedDescription)")
+    fail("bobbin-icon: \(error.localizedDescription)")
 }

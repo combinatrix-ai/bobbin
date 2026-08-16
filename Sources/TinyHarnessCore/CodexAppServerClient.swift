@@ -91,8 +91,8 @@ public final class CodexAppServerClient: @unchecked Sendable {
             method: "initialize",
             params: [
                 "clientInfo": [
-                    "name": "tiny_harness_gui",
-                    "title": "Tiny Harness",
+                    "name": "bobbin",
+                    "title": "Bobbin",
                     "version": "0.1.0"
                 ]
             ]
@@ -193,7 +193,7 @@ public final class CodexAppServerClient: @unchecked Sendable {
         guard let input = inputPipe?.fileHandleForWriting, let id = message["id"] else { return }
         let response: JSONObject = [
             "id": id,
-            "error": ["code": -32601, "message": "Tiny Harness does not support this server request"]
+            "error": ["code": -32601, "message": "Bobbin does not support this server request"]
         ]
         if let data = try? Self.encodedLine(response) {
             try? input.write(contentsOf: data)

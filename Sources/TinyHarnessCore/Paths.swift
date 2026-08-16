@@ -16,7 +16,7 @@ public struct HarnessPaths: Sendable {
                 appropriateFor: nil,
                 create: true
             )
-            resolvedRoot = appSupport.appendingPathComponent("TinyHarness", isDirectory: true)
+            resolvedRoot = appSupport.appendingPathComponent("Bobbin", isDirectory: true)
         }
 
         self.root = resolvedRoot

@@ -262,7 +262,7 @@ public final class HarnessController: ObservableObject {
             "approvalPolicy": thread.reviewMode.approvalPolicy,
             "approvalsReviewer": thread.reviewMode.approvalsReviewer,
             "sandbox": thread.reviewMode.sandboxMode,
-            "serviceName": "tiny_harness_gui"
+            "serviceName": "bobbin"
         ]
     }
 

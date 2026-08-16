@@ -184,7 +184,7 @@ private struct TopStrip: View {
                 Button("Restart app-server", action: controller.restart)
                 Text("Auth: \(authenticationLabel)")
                 Divider()
-                Button("Quit Tiny Harness") {
+                Button("Quit Bobbin") {
                     NSApplication.shared.terminate(nil)
                 }
             } label: {

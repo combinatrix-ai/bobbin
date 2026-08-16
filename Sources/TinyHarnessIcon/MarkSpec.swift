@@ -25,7 +25,7 @@ public struct IconColor: Equatable, Sendable {
     public static let black = IconColor(hex: 0x000000)
 }
 
-/// The Tiny Harness mark: two opposing thick rounded arcs forming an open loop
+/// The Bobbin mark: two opposing thick rounded arcs forming an open loop
 /// around a small central square.
 ///
 /// Defined in a unit box with the loop centred on (0.5, 0.5), so one

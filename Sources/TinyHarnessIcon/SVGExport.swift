@@ -33,7 +33,7 @@ public enum SVGExport {
         return """
         <svg xmlns="http://www.w3.org/2000/svg" width="\(number(size))" height="\(number(size))" \
         viewBox="0 0 \(number(size)) \(number(size))">
-          <title>Tiny Harness mark</title>
+          <title>Bobbin mark</title>
         \(arcs)
         \(core)
         </svg>

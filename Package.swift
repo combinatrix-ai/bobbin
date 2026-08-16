@@ -3,11 +3,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "TinyHarnessGUI",
+    name: "Bobbin",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "TinyHarnessGUI", targets: ["TinyHarnessGUI"]),
-        .executable(name: "tiny-harness-icon", targets: ["TinyHarnessIconTool"])
+        // Product names are what land in `.build/<config>/`, so these carry
+        // the shipped brand while the target names stay internal.
+        .executable(name: "Bobbin", targets: ["TinyHarnessGUI"]),
+        .executable(name: "bobbin-icon", targets: ["TinyHarnessIconTool"])
     ],
     targets: [
         .target(name: "TinyHarnessCore"),

@@ -11,7 +11,7 @@ struct TinyHarnessApp: App {
             let controller = try HarnessController()
             _controller = StateObject(wrappedValue: controller)
         } catch {
-            fatalError("Tiny Harness failed to initialize: \(error.localizedDescription)")
+            fatalError("Bobbin failed to initialize: \(error.localizedDescription)")
         }
     }
 
@@ -20,12 +20,12 @@ struct TinyHarnessApp: App {
             RootView(controller: controller)
                 .frame(width: 392, height: 560)
         } label: {
-            // The status item carries the Tiny Harness mark itself. The image
+            // The status item carries the Bobbin mark itself. The image
             // is a template, so AppKit tints it for light and dark menu bars
             // and inverts it while the popover is open.
             Image(nsImage: Self.menuBarIcon)
                 .renderingMode(.template)
-                .accessibilityLabel("Tiny Harness")
+                .accessibilityLabel("Bobbin")
         }
         .menuBarExtraStyle(.window)
     }

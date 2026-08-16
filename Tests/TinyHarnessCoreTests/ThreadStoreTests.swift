@@ -405,7 +405,7 @@ private struct Fixture {
     @MainActor
     init() throws {
         root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("TinyHarnessTests-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("BobbinTests-\(UUID().uuidString)", isDirectory: true)
         paths = try HarnessPaths(root: root)
         store = try ThreadStore(paths: paths)
     }
