@@ -453,6 +453,13 @@ private struct ConversationView: View {
                     ForEach(thread.messages) { message in
                         MessageBubble(message: message).id(message.id)
                     }
+
+                    // Quiet assistant-side placeholder while the turn is in
+                    // flight. The first assistant delta appends a message, so
+                    // this disappears on its own.
+                    if isAwaitingAssistant(thread) {
+                        PendingReplyIndicator()
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -470,25 +477,21 @@ private struct ConversationView: View {
 
     private func composer(_ thread: HarnessThread) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
-            ZStack(alignment: .topLeading) {
-                if prompt.isEmpty {
-                    Text("メッセージ")
-                        .font(.system(size: 12))
-                        .foregroundStyle(.tertiary)
-                        .padding(.top, 9)
-                        .padding(.leading, 11)
+            // A vertical-axis TextField gives the placeholder for free, so the
+            // prompt and the placeholder share one inset and one baseline. It
+            // starts exactly one line tall and grows to `maxComposerLines`
+            // before it starts scrolling.
+            TextField("メッセージ", text: $prompt, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .lineLimit(1...maxComposerLines)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 8)
+                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 13))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 13)
+                        .stroke(Color.primary.opacity(0.09), lineWidth: 1)
                 }
-                TextEditor(text: $prompt)
-                    .font(.system(size: 12))
-                    .scrollContentBackground(.hidden)
-                    .padding(5)
-            }
-            .frame(minHeight: 42, maxHeight: 84)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 13))
-            .overlay {
-                RoundedRectangle(cornerRadius: 13)
-                    .stroke(Color.primary.opacity(0.09), lineWidth: 1)
-            }
 
             Button(action: sendOrStop) {
                 Image(systemName: thread.status == .running ? "stop.fill" : "arrow.up")
@@ -510,8 +513,16 @@ private struct ConversationView: View {
         .overlay(alignment: .top) { Divider() }
     }
 
+    /// Restrained ceiling for the composer inside a 392x560 popover: past this
+    /// the field scrolls instead of eating the conversation.
+    private var maxComposerLines: Int { 5 }
+
     private var isPromptEmpty: Bool {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func isAwaitingAssistant(_ thread: HarnessThread) -> Bool {
+        thread.status == .running && thread.messages.last?.role == .user
     }
 
     private func sendOrStop() {
@@ -670,6 +681,16 @@ private struct ModelPicker: View {
         } else {
             Text(title)
         }
+    }
+}
+
+private struct PendingReplyIndicator: View {
+    var body: some View {
+        Text("…")
+            .font(.system(size: 12.5))
+            .foregroundStyle(.tertiary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel("応答を待っています")
     }
 }
 
