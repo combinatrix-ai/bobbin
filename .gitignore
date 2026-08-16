@@ -6,3 +6,7 @@
 # Local packaged builds and runtime state
 dist/
 Tiny Harness.app/
+
+# Icon artefacts are generated from Sources/TinyHarnessIcon at package time
+*.iconset/
+*.icns

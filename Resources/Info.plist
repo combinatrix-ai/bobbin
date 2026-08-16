@@ -8,6 +8,8 @@
     <string>Tiny Harness</string>
     <key>CFBundleExecutable</key>
     <string>TinyHarnessGUI</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>com.hmirin.tiny-harness</string>
     <key>CFBundleInfoDictionaryVersion</key>
