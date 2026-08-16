@@ -11,46 +11,45 @@ struct APIKeyChoiceView: View {
     @State private var enteredKey = ""
 
     var body: some View {
-        VStack(spacing: 15) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 27))
-                .frame(width: 48, height: 48)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 13))
-            Text("API keyが見つかりました")
-                .font(.system(size: 18, weight: .semibold))
-            Text("\(source) にOpenAI API keyがあります。今回のTiny Harnessで使いますか？")
-                .font(.system(size: 11.5))
+        VStack(spacing: 14) {
+            Image(systemName: "key")
+                .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 330)
+                .frame(width: 42, height: 42)
+                .background(.quaternary, in: RoundedRectangle(cornerRadius: 11))
+
+            Text("OPENAI_API_KEY を検出")
+                .font(.system(size: 15, weight: .semibold))
 
             HStack(spacing: 8) {
-                Button("API keyを使う", action: useDetected)
+                Button("このキーを使う", action: useDetected)
                     .buttonStyle(.borderedProminent)
-                Button("Device authを使う", action: useDeviceAuth)
+                    .controlSize(.small)
+                Button("Device auth", action: useDeviceAuth)
                     .buttonStyle(.bordered)
+                    .controlSize(.small)
             }
 
-            DisclosureGroup("別のAPI keyを入力", isExpanded: $showManualEntry) {
-                HStack {
-                    SecureField("sk-...", text: $enteredKey)
+            DisclosureGroup("別のキーを入力", isExpanded: $showManualEntry) {
+                HStack(spacing: 6) {
+                    SecureField("sk-…", text: $enteredKey)
                         .textFieldStyle(.roundedBorder)
-                    Button("Use") {
+                    Button("使用") {
                         useEntered(enteredKey)
                         enteredKey = ""
                     }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                     .disabled(enteredKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                .padding(.top, 8)
+                .padding(.top, 6)
             }
-            .font(.system(size: 11))
-            .frame(maxWidth: 330)
-
-            Text("keyの値はTiny Harnessの履歴には保存しません")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+            .font(.system(size: 10.5))
+            .frame(maxWidth: 280)
+            .help("検出元: \(source)")
         }
-        .padding(36)
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -58,42 +57,54 @@ struct DeviceAuthView: View {
     let verificationURL: String
     let userCode: String
 
+    @State private var copied = false
+
     var body: some View {
-        VStack(spacing: 15) {
+        VStack(spacing: 14) {
             Text("ti")
-                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
                 .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-                .frame(width: 46, height: 46)
-                .background(.primary, in: RoundedRectangle(cornerRadius: 12))
-            Text("Connect to Codex")
-                .font(.system(size: 18, weight: .semibold))
-            Text("API keyは使いません。ブラウザでdevice authを完了してください。")
-                .font(.system(size: 11.5))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-            Text(userCode)
-                .font(.system(size: 21, weight: .semibold, design: .monospaced))
-                .tracking(2)
-                .textSelection(.enabled)
-                .padding(.horizontal, 22)
-                .frame(height: 52)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 11))
-            HStack(spacing: 8) {
-                Button("Open browser") {
-                    if let url = URL(string: verificationURL) { NSWorkspace.shared.open(url) }
-                }
-                .buttonStyle(.borderedProminent)
-                Button("Copy code") {
+                .frame(width: 42, height: 42)
+                .background(.primary, in: RoundedRectangle(cornerRadius: 11))
+
+            Text("Codexに接続")
+                .font(.system(size: 15, weight: .semibold))
+
+            HStack(spacing: 6) {
+                Text(userCode)
+                    .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                    .tracking(1.5)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, 15)
+                    .frame(height: 44)
+                    .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
+
+                Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(userCode, forType: .string)
+                    copied = true
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 11, weight: .medium))
+                        .frame(width: 28, height: 28)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
+                .help("コードをコピー")
+                .accessibilityLabel("コードをコピー")
             }
-            Label("Waiting for authorization", systemImage: "clock")
-                .font(.system(size: 10.5))
+
+            Button("ブラウザで開く") {
+                if let url = URL(string: verificationURL) { NSWorkspace.shared.open(url) }
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+
+            Label("承認を待っています", systemImage: "clock")
+                .font(.system(size: 10))
                 .foregroundStyle(.secondary)
         }
-        .padding(36)
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -102,19 +113,23 @@ struct AuthErrorView: View {
     let retryDeviceAuth: () -> Void
 
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "person.crop.circle.badge.exclamationmark")
-                .font(.system(size: 34))
+        VStack(spacing: 11) {
+            Image(systemName: "exclamationmark.circle")
+                .font(.system(size: 24))
                 .foregroundStyle(.red)
-            Text("Authentication failed").font(.system(size: 17, weight: .semibold))
+            Text("認証できませんでした")
+                .font(.system(size: 14, weight: .semibold))
             Text(message)
-                .font(.system(size: 11.5))
+                .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 330)
-            Button("Try device auth", action: retryDeviceAuth)
+                .lineLimit(3)
+                .frame(maxWidth: 300)
+            Button("Device authを再試行", action: retryDeviceAuth)
                 .buttonStyle(.borderedProminent)
+                .controlSize(.small)
         }
-        .padding(36)
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

@@ -2,111 +2,290 @@ import AppKit
 import SwiftUI
 import TinyHarnessCore
 
+/// The authenticated part of the menu-bar popover.
+///
+/// The list is intentionally the landing view. A thread is opened as a
+/// separate, focused conversation so the popover does not keep two dense
+/// panes visible at once.
 struct HarnessView: View {
     @ObservedObject var controller: HarnessController
     @ObservedObject var store: ThreadStore
 
+    @State private var showingConversation = false
+    @State private var conversationID: UUID?
+
     var body: some View {
-        HStack(spacing: 0) {
-            ThreadSidebar(controller: controller, store: store)
-                .frame(width: 154)
-            Divider()
-            if let thread = store.selectedThread {
-                ConversationView(controller: controller, store: store, threadID: thread.id)
+        Group {
+            if showingConversation, let conversationID {
+                ConversationView(
+                    controller: controller,
+                    store: store,
+                    threadID: conversationID,
+                    back: closeConversation
+                )
             } else {
-                ContentUnavailableView("No thread", systemImage: "bubble.left")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                ThreadListView(
+                    controller: controller,
+                    store: store,
+                    open: openConversation,
+                    create: createThread
+                )
             }
+        }
+        .onAppear {
+            // The menu-bar popover always opens on the lightweight index.
+            // The selected ID remains persisted by ThreadStore for the next
+            // conversation and for app-server resume.
+            showingConversation = false
+            conversationID = nil
+        }
+    }
+
+    private func openConversation(_ id: UUID) {
+        controller.selectThread(id)
+        conversationID = id
+        withAnimation(.easeOut(duration: 0.16)) {
+            showingConversation = true
+        }
+    }
+
+    private func createThread() {
+        controller.createThread()
+        // createThread selects the new item in the store. Defer one run-loop
+        // so the published state has reached SwiftUI before reading it.
+        DispatchQueue.main.async {
+            guard let id = store.selectedThread?.id else { return }
+            conversationID = id
+            withAnimation(.easeOut(duration: 0.16)) {
+                showingConversation = true
+            }
+        }
+    }
+
+    private func closeConversation() {
+        withAnimation(.easeOut(duration: 0.16)) {
+            showingConversation = false
         }
     }
 }
 
-private struct ThreadSidebar: View {
+private struct ThreadListView: View {
     @ObservedObject var controller: HarnessController
     @ObservedObject var store: ThreadStore
+    let open: (UUID) -> Void
+    let create: () -> Void
+
+    @State private var showingServerDetail = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Threads")
-                    .font(.system(size: 10.5, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Button {
-                    controller.createThread()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .semibold))
-                        .frame(width: 24, height: 24)
-                }
-                .buttonStyle(.plain)
-                .help("New thread")
+            ListHeader(controller: controller, create: create)
+
+            if case .stopped(let detail) = controller.serverState {
+                ServerBanner(
+                    detail: detail,
+                    showingDetail: $showingServerDetail,
+                    restart: controller.restart
+                )
             }
-            .padding(.leading, 8)
-            .padding(.trailing, 5)
-            .frame(height: 38)
 
             ScrollView {
-                LazyVStack(spacing: 3) {
-                    ForEach(store.activeThreads) { thread in
-                        ThreadRow(
-                            thread: thread,
-                            isSelected: store.state.selectedThreadID == thread.id,
-                            opacity: controller.opacity(for: thread),
-                            select: { controller.selectThread(thread.id) },
-                            save: { controller.saveThread(thread.id) }
-                        )
-                    }
-                }
-                .padding(.horizontal, 7)
-            }
-
-            VStack(spacing: 0) {
-                Divider().padding(.bottom, 7)
-                Text("Saved")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 4)
-
-                if store.savedThreads.isEmpty {
-                    Text("保存した結果はここに残ります")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.tertiary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                } else {
-                    ScrollView {
-                        LazyVStack(spacing: 3) {
-                            ForEach(store.savedThreads) { thread in
-                                ThreadRow(
-                                    thread: thread,
-                                    isSelected: store.state.selectedThreadID == thread.id,
-                                    opacity: 1,
-                                    select: { controller.selectThread(thread.id) },
-                                    save: {}
-                                )
-                            }
+                LazyVStack(spacing: 1) {
+                    if store.activeThreads.isEmpty, store.savedThreads.isEmpty {
+                        EmptyThreadView(create: create)
+                    } else {
+                        ForEach(store.activeThreads) { thread in
+                            ThreadRow(
+                                thread: thread,
+                                isSelected: false,
+                                opacity: controller.opacity(for: thread),
+                                select: { open(thread.id) },
+                                save: { controller.saveThread(thread.id) }
+                            )
                         }
-                        .padding(.horizontal, 7)
-                    }
-                    .frame(maxHeight: 130)
-                }
 
-                Divider().padding(.top, 7)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("7 day cleanup").font(.system(size: 9.5, weight: .semibold))
-                    Text("最終会話から7日で自動削除")
-                        .font(.system(size: 8.5))
-                        .foregroundStyle(.secondary)
+                        if !store.savedThreads.isEmpty {
+                            SavedSection(
+                                threads: store.savedThreads,
+                                selectedID: store.state.selectedThreadID,
+                                open: open
+                            )
+                        }
+                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(8)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+            }
+            .scrollIndicators(.automatic)
+        }
+        .background(.regularMaterial)
+    }
+}
+
+private struct ListHeader: View {
+    @ObservedObject var controller: HarnessController
+    let create: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text("ti")
+                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                .tracking(-0.6)
+                .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+                .frame(width: 21, height: 19)
+                .background(.primary, in: RoundedRectangle(cornerRadius: 5))
+
+            Text("Tiny Harness")
+                .font(.system(size: 12.5, weight: .semibold))
+
+            Circle()
+                .fill(statusColor)
+                .frame(width: 6, height: 6)
+                .accessibilityLabel(controller.serverState.label)
+
+            Spacer(minLength: 4)
+
+            Button(action: create) {
+                Image(systemName: "plus")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 27, height: 27)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .help("新しいスレッド")
+            .accessibilityLabel("新しいスレッド")
+
+            Menu {
+                Text("認証: \(authenticationLabel)")
+                Text("モデル: luna · xhigh")
+                Divider()
+                Button("app-serverを再起動", action: controller.restart)
+                Divider()
+                Button("Tiny Harnessを終了") {
+                    NSApplication.shared.terminate(nil)
+                }
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 11, weight: .medium))
+                    .frame(width: 27, height: 27)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("設定")
+            .accessibilityLabel("設定")
+        }
+        .padding(.horizontal, 12)
+        .frame(height: 42)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var statusColor: Color {
+        switch controller.serverState {
+        case .starting: .secondary
+        case .ready: .green
+        case .stopped: .red
+        }
+    }
+
+    private var authenticationLabel: String {
+        if case .authenticated(let mode) = controller.authState { return mode.rawValue }
+        return "未接続"
+    }
+}
+
+private struct ServerBanner: View {
+    let detail: String
+    @Binding var showingDetail: Bool
+    let restart: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 7) {
+                Circle().fill(.red).frame(width: 6, height: 6)
+                Text("サーバー停止")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if !detail.isEmpty {
+                    Button(showingDetail ? "閉じる" : "詳細") {
+                        withAnimation(.easeOut(duration: 0.12)) {
+                            showingDetail.toggle()
+                        }
+                    }
+                    .font(.system(size: 10, weight: .medium))
+                    .buttonStyle(.plain)
+                }
+                Button("再起動", action: restart)
+                    .font(.system(size: 10, weight: .semibold))
+                    .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+
+            if showingDetail, !detail.isEmpty {
+                Text(detail)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.42))
+        .padding(.horizontal, 8)
+        .padding(.top, 6)
+    }
+}
+
+private struct EmptyThreadView: View {
+    let create: () -> Void
+
+    var body: some View {
+        Button(action: create) {
+            Image(systemName: "plus")
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("新しいスレッド")
+        .accessibilityLabel("新しいスレッド")
+        .frame(maxWidth: .infinity, minHeight: 150)
+    }
+}
+
+private struct SavedSection: View {
+    let threads: [HarnessThread]
+    let selectedID: UUID?
+    let open: (UUID) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 6) {
+                Text("保存済み")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .padding(.top, 9)
+            .padding(.horizontal, 8)
+            .padding(.bottom, 4)
+
+            ForEach(threads) { thread in
+                ThreadRow(
+                    thread: thread,
+                    isSelected: selectedID == thread.id,
+                    opacity: 1,
+                    select: { open(thread.id) },
+                    save: {}
+                )
+            }
+        }
+        .overlay(alignment: .top) { Divider() }
+        .padding(.top, 8)
     }
 }
 
@@ -118,51 +297,69 @@ private struct ThreadRow: View {
     let save: () -> Void
 
     var body: some View {
-        HStack(spacing: 2) {
+        HStack(spacing: 1) {
             Button(action: select) {
-                VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 7) {
+                    if thread.status == .running {
+                        Circle()
+                            .fill(.green)
+                            .frame(width: 6, height: 6)
+                            .accessibilityLabel("実行中")
+                    }
+
                     Text(thread.title)
-                        .font(.system(size: 11.5, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                         .lineLimit(1)
-                    Text(metadata)
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(thread.status == .running ? Color.green : .secondary)
-                        .lineLimit(1)
+
+                    Spacer(minLength: 3)
+
+                    if !thread.isSaved {
+                        Text(metadata)
+                            .font(.system(size: 10, weight: .regular))
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .monospacedDigit()
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 7)
-                .padding(.vertical, 7)
+                .padding(.leading, 8)
+                .padding(.vertical, 8)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(accessibilityLabel)
 
             Button(action: save) {
                 Image(systemName: thread.isSaved ? "star.fill" : "star")
-                    .font(.system(size: 11))
-                    .foregroundStyle(thread.isSaved ? Color.green : .secondary)
-                    .frame(width: 23, height: 23)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(thread.isSaved ? Color.green : Color.secondary)
+                    .frame(width: 25, height: 25)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(thread.isSaved)
-            .help(thread.isSaved ? "Saved" : "Save thread")
+            .help(thread.isSaved ? "保存済み" : "保存して残す")
+            .accessibilityLabel(thread.isSaved ? "保存済み" : "スレッドを保存")
         }
-        .background(isSelected ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.14) : .clear)
-        .clipShape(RoundedRectangle(cornerRadius: 9))
+        .background(isSelected ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.15) : .clear)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
         .opacity(opacity)
     }
 
-    private var metadata: String {
-        if thread.isSaved { return "Saved" }
-        if thread.status == .running { return "Running · now" }
-        return relativeDate(thread.lastConversationAt)
+    private var accessibilityLabel: String {
+        if thread.isSaved { return "\(thread.title)、保存済み" }
+        return "\(thread.title)、\(metadata)"
     }
 
-    private func relativeDate(_ date: Date) -> String {
-        let seconds = max(0, Date().timeIntervalSince(date))
-        if seconds < 60 { return "now" }
-        if seconds < 3_600 { return "\(Int(seconds / 60)) min ago" }
-        if seconds < 86_400 { return "\(Int(seconds / 3_600)) hours ago" }
-        return "\(Int(seconds / 86_400)) days ago"
+    private var metadata: String {
+        if thread.status == .running { return "実行中" }
+        let age = max(0, Date().timeIntervalSince(thread.lastConversationAt))
+        let remaining = Int(ceil((7 * 24 * 60 * 60 - age) / (24 * 60 * 60)))
+        if remaining <= 2 { return "残り\(max(0, remaining))日" }
+        if age < 60 { return "たった今" }
+        if age < 3_600 { return "\(Int(age / 60))分前" }
+        if age < 86_400 { return "\(Int(age / 3_600))時間前" }
+        return "\(Int(age / 86_400))日前"
     }
 }
 
@@ -170,8 +367,10 @@ private struct ConversationView: View {
     @ObservedObject var controller: HarnessController
     @ObservedObject var store: ThreadStore
     let threadID: UUID
+    let back: () -> Void
 
     @State private var prompt = ""
+    @State private var showingServerDetail = false
 
     private var thread: HarnessThread? {
         store.state.threads.first { $0.id == threadID }
@@ -180,141 +379,113 @@ private struct ConversationView: View {
     var body: some View {
         if let thread {
             VStack(spacing: 0) {
-                conversationHeader(thread)
+                ConversationHeader(
+                    thread: thread,
+                    save: { controller.saveThread(thread.id) },
+                    back: back,
+                    chooseFolder: { chooseFolder(for: thread) }
+                )
+
+                if case .stopped(let detail) = controller.serverState {
+                    ServerBanner(
+                        detail: detail,
+                        showingDetail: $showingServerDetail,
+                        restart: controller.restart
+                    )
+                }
+
                 Divider()
                 messageList(thread)
-                Divider()
                 composer(thread)
             }
+            .background(.regularMaterial)
+        } else {
+            Color.clear.onAppear(perform: back)
         }
-    }
-
-    private func conversationHeader(_ thread: HarnessThread) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(thread.title)
-                    .font(.system(size: 11.5, weight: .semibold))
-                    .lineLimit(1)
-                Button {
-                    chooseFolder(for: thread)
-                } label: {
-                    Label(URL(fileURLWithPath: thread.workingDirectory).lastPathComponent, systemImage: "folder")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .buttonStyle(.plain)
-                .help(thread.workingDirectory)
-            }
-            Spacer()
-            Button(thread.isSaved ? "保存済み" : "結果を保存") {
-                controller.saveThread(thread.id)
-            }
-            .font(.system(size: 9.5, weight: .semibold))
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .disabled(thread.isSaved)
-
-            Text("luna · xhigh")
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 7)
-                .frame(height: 25)
-                .background(.quaternary, in: RoundedRectangle(cornerRadius: 7))
-        }
-        .padding(.horizontal, 13)
-        .frame(height: 52)
     }
 
     private func messageList(_ thread: HarnessThread) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if thread.messages.isEmpty {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text("New thread").font(.system(size: 12, weight: .semibold))
-                            Text("このスレッドはTiny Harness専用の履歴領域で動きます。")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-
+                LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(thread.messages) { message in
                         MessageBubble(message: message).id(message.id)
                     }
                 }
-                .padding(15)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
             }
+            .scrollIndicators(.automatic)
             .onChange(of: thread.messages) { _, messages in
                 guard let last = messages.last else { return }
-                withAnimation(.easeOut(duration: 0.16)) { proxy.scrollTo(last.id, anchor: .bottom) }
+                withAnimation(.easeOut(duration: 0.16)) {
+                    proxy.scrollTo(last.id, anchor: .bottom)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func composer(_ thread: HarnessThread) -> some View {
-        VStack(spacing: 6) {
+        HStack(alignment: .bottom, spacing: 8) {
             ZStack(alignment: .topLeading) {
                 if prompt.isEmpty {
-                    Text("追加の指示を送る")
-                        .font(.system(size: 11.5))
+                    Text("メッセージ")
+                        .font(.system(size: 12))
                         .foregroundStyle(.tertiary)
-                        .padding(.top, 10)
-                        .padding(.leading, 9)
+                        .padding(.top, 9)
+                        .padding(.leading, 11)
                 }
                 TextEditor(text: $prompt)
-                    .font(.system(size: 11.5))
+                    .font(.system(size: 12))
                     .scrollContentBackground(.hidden)
-                    .padding(4)
+                    .padding(5)
             }
-            .frame(height: 64)
-            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 11))
-            .overlay(alignment: .bottomTrailing) {
-                Button {
-                    let outgoing = prompt
-                    prompt = ""
-                    controller.send(outgoing, in: thread.id)
-                } label: {
-                    Image(systemName: "arrow.up")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-                        .frame(width: 29, height: 29)
-                        .background(.primary, in: RoundedRectangle(cornerRadius: 8))
-                }
-                .buttonStyle(.plain)
-                .disabled(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || thread.status == .running)
-                .opacity(prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0.35 : 1)
-                .padding(7)
-                .keyboardShortcut(.return, modifiers: .command)
+            .frame(minHeight: 42, maxHeight: 84)
+            .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 13))
+            .overlay {
+                RoundedRectangle(cornerRadius: 13)
+                    .stroke(Color.primary.opacity(0.09), lineWidth: 1)
             }
 
-            HStack {
-                Text("未保存は最終会話から7日で削除")
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if thread.status == .running {
-                    Button {
-                        controller.stopThread(thread.id)
-                    } label: {
-                        Label("Stop run", systemImage: "stop.fill")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.red)
-                    }
-                    .buttonStyle(.plain)
-                }
+            Button(action: sendOrStop) {
+                Image(systemName: thread.status == .running ? "stop.fill" : "arrow.up")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+                    .frame(width: 30, height: 30)
+                    .background(thread.status == .running ? Color.red : Color.primary, in: Circle())
             }
+            .buttonStyle(.plain)
+            .disabled(thread.status == .running ? false : isPromptEmpty || controller.serverState != .ready)
+            .opacity(thread.status == .running || !isPromptEmpty ? 1 : 0.3)
+            .help(thread.status == .running ? "生成を停止" : "送信")
+            .accessibilityLabel(thread.status == .running ? "生成を停止" : "送信")
+            .keyboardShortcut(.return, modifiers: .command)
         }
         .padding(.horizontal, 10)
-        .padding(.top, 9)
+        .padding(.top, 8)
         .padding(.bottom, 10)
+        .overlay(alignment: .top) { Divider() }
+    }
+
+    private var isPromptEmpty: Bool {
+        prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func sendOrStop() {
+        guard let thread else { return }
+        if thread.status == .running {
+            controller.stopThread(thread.id)
+        } else {
+            let outgoing = prompt
+            prompt = ""
+            controller.send(outgoing, in: thread.id)
+        }
     }
 
     private func chooseFolder(for thread: HarnessThread) {
         let panel = NSOpenPanel()
-        panel.title = "Choose working folder"
+        panel.title = "作業フォルダ"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
@@ -324,30 +495,83 @@ private struct ConversationView: View {
     }
 }
 
+private struct ConversationHeader: View {
+    let thread: HarnessThread
+    let save: () -> Void
+    let back: () -> Void
+    let chooseFolder: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 5) {
+                Button(action: back) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("スレッド一覧に戻る")
+                .accessibilityLabel("スレッド一覧に戻る")
+
+                Text(thread.title)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .lineLimit(1)
+
+                Spacer(minLength: 3)
+
+                Button(action: save) {
+                    Image(systemName: thread.isSaved ? "star.fill" : "star")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(thread.isSaved ? Color.green : Color.secondary)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .disabled(thread.isSaved)
+                .help(thread.isSaved ? "保存済み" : "保存して残す")
+                .accessibilityLabel(thread.isSaved ? "保存済み" : "スレッドを保存")
+            }
+            .padding(.horizontal, 7)
+            .frame(height: 40)
+
+            HStack(spacing: 7) {
+                Button(action: chooseFolder) {
+                    Label(folderName, systemImage: "folder")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .help(thread.workingDirectory)
+                .accessibilityLabel("作業フォルダ: \(thread.workingDirectory)")
+
+                Spacer(minLength: 3)
+                Text("luna · xhigh")
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .help("gpt-5.6-luna · reasoning xhigh")
+            }
+            .padding(.horizontal, 13)
+            .frame(height: 24)
+        }
+    }
+
+    private var folderName: String {
+        URL(fileURLWithPath: thread.workingDirectory).lastPathComponent
+    }
+}
+
 private struct MessageBubble: View {
     let message: ChatMessage
 
     var body: some View {
-        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 4) {
-            Text(label)
-                .font(.system(size: 9.5, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Text(message.text)
-                .font(.system(size: 11.5))
-                .textSelection(.enabled)
-                .padding(message.role == .user ? 9 : 0)
-                .background(message.role == .user ? Color(nsColor: .controlBackgroundColor) : .clear)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-        }
-        .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
-        .foregroundStyle(message.role == .system ? Color.red : Color.primary)
-    }
-
-    private var label: String {
-        switch message.role {
-        case .user: "You"
-        case .assistant: "Luna"
-        case .system: "Tiny Harness"
-        }
+        Text(message.text)
+            .font(.system(size: 12.5))
+            .textSelection(.enabled)
+            .foregroundStyle(message.role == .system ? Color.red : Color.primary)
+            .padding(message.role == .user ? 8 : 0)
+            .background(message.role == .user ? Color(nsColor: .controlBackgroundColor) : .clear)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
+            .accessibilityLabel(message.text)
     }
 }

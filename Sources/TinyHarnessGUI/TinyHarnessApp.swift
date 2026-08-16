@@ -17,7 +17,7 @@ struct TinyHarnessApp: App {
     var body: some Scene {
         MenuBarExtra {
             RootView(controller: controller)
-                .frame(width: 560, height: 650)
+                .frame(width: 392, height: 560)
         } label: {
             Text("ti")
                 .font(.system(.caption2, design: .monospaced, weight: .bold))
