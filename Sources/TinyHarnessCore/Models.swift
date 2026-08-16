@@ -43,6 +43,65 @@ public enum HarnessThreadStatus: String, Codable, Sendable {
     }
 }
 
+/// How a thread handles approval escalations and how far the sandbox reaches.
+///
+/// The three cases are the only user-facing choices; each one maps to a fixed
+/// combination of app-server `approvalPolicy`, `approvalsReviewer`, and
+/// `sandbox`, so the user never has to reason about the wire protocol.
+public enum HarnessReviewMode: String, Codable, CaseIterable, Identifiable, Sendable {
+    /// Escalations are requested, then judged by the app-server review subagent.
+    case autoReview
+    /// Nothing is ever asked and nothing is fenced off.
+    case allowAll
+    /// Nothing is ever asked, so nothing can escape the workspace sandbox.
+    case denyAll
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .autoReview: "自動監査"
+        case .allowAll: "全部OK"
+        case .denyAll: "全部拒否"
+        }
+    }
+
+    /// One short line that makes the choice understandable without a manual.
+    public var summary: String {
+        switch self {
+        case .autoReview: "エスカレーションを自動で審査"
+        case .allowAll: "確認なし・サンドボックス解除"
+        case .denyAll: "エスカレーションを常に拒否"
+        }
+    }
+
+    /// app-server `AskForApproval`.
+    public var approvalPolicy: String {
+        switch self {
+        case .autoReview: "on-request"
+        case .allowAll, .denyAll: "never"
+        }
+    }
+
+    /// app-server `ApprovalsReviewer`. Only `.autoReview` delegates to the
+    /// review subagent; the other two pin the protocol default back to `user`
+    /// so switching away from auto review takes effect on the next turn.
+    public var approvalsReviewer: String {
+        switch self {
+        case .autoReview: "auto_review"
+        case .allowAll, .denyAll: "user"
+        }
+    }
+
+    /// app-server `SandboxMode`.
+    public var sandboxMode: String {
+        switch self {
+        case .autoReview, .denyAll: "workspace-write"
+        case .allowAll: "danger-full-access"
+        }
+    }
+}
+
 public struct HarnessModelOption: Identifiable, Equatable, Sendable {
     public let id: String
     public let displayName: String
@@ -58,6 +117,7 @@ public struct HarnessModelOption: Identifiable, Equatable, Sendable {
 public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     public static let defaultModel = "gpt-5.6-luna"
     public static let defaultReasoningEffort = "xhigh"
+    public static let defaultReviewMode = HarnessReviewMode.autoReview
 
     /// Working directory for a new thread when the caller does not supply one.
     /// Deliberately computed from the current user's home each time rather than
@@ -73,6 +133,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     public var workingDirectory: String
     public var model: String
     public var reasoningEffort: String
+    public var reviewMode: HarnessReviewMode
     public var lastConversationAt: Date
     public var savedAt: Date?
     public var status: HarnessThreadStatus
@@ -86,6 +147,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         workingDirectory: String,
         model: String = Self.defaultModel,
         reasoningEffort: String = Self.defaultReasoningEffort,
+        reviewMode: HarnessReviewMode = Self.defaultReviewMode,
         lastConversationAt: Date = Date(),
         savedAt: Date? = nil,
         status: HarnessThreadStatus = .idle,
@@ -98,6 +160,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         self.workingDirectory = workingDirectory
         self.model = model
         self.reasoningEffort = reasoningEffort
+        self.reviewMode = reviewMode
         self.lastConversationAt = lastConversationAt
         self.savedAt = savedAt
         self.status = status
@@ -114,6 +177,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         case workingDirectory
         case model
         case reasoningEffort
+        case reviewMode
         case lastConversationAt
         case savedAt
         case status
@@ -130,6 +194,10 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         model = try container.decodeIfPresent(String.self, forKey: .model) ?? Self.defaultModel
         reasoningEffort = try container.decodeIfPresent(String.self, forKey: .reasoningEffort)
             ?? Self.defaultReasoningEffort
+        // `try?` covers both a thread stored before review modes existed and a
+        // value this build no longer recognises: neither may fail the load.
+        reviewMode = (try? container.decodeIfPresent(HarnessReviewMode.self, forKey: .reviewMode))
+            ?? Self.defaultReviewMode
         lastConversationAt = try container.decode(Date.self, forKey: .lastConversationAt)
         savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt)
         status = try container.decode(HarnessThreadStatus.self, forKey: .status)

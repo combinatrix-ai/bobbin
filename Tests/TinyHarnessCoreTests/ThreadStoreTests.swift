@@ -237,6 +237,106 @@ final class ThreadStoreTests: XCTestCase {
         XCTAssertEqual(turn["effort"] as? String, "max")
         XCTAssertEqual(turn["threadId"] as? String, "codex-thread")
     }
+
+    @MainActor
+    func testReviewModeDefaultsToAutoReviewAndPersistsPerThread() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+        XCTAssertEqual(thread.reviewMode, .autoReview)
+        XCTAssertEqual(HarnessThread.defaultReviewMode, .autoReview)
+
+        let other = try fixture.store.createThread(workingDirectory: "/tmp/other")
+        try fixture.store.update(thread.id) { $0.reviewMode = .allowAll }
+
+        let reloaded = try ThreadStore(paths: fixture.paths)
+        XCTAssertEqual(reloaded.state.threads.first(where: { $0.id == thread.id })?.reviewMode, .allowAll)
+        // The mode is per thread: the sibling keeps the default.
+        XCTAssertEqual(reloaded.state.threads.first(where: { $0.id == other.id })?.reviewMode, .autoReview)
+    }
+
+    @MainActor
+    func testStoredThreadsWithoutOrWithUnknownReviewModeDecodeAsAutoReview() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let legacy = try fixture.store.createThread(workingDirectory: "/tmp/legacy")
+        let unknown = try fixture.store.createThread(workingDirectory: "/tmp/unknown")
+        try fixture.store.update(unknown.id) { $0.reviewMode = .denyAll }
+
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(contentsOf: fixture.paths.stateFile)
+            ) as? [String: Any]
+        )
+        var threads = try XCTUnwrap(object["threads"] as? [[String: Any]])
+        let legacyIndex = try XCTUnwrap(
+            threads.firstIndex { $0["id"] as? String == legacy.id.uuidString }
+        )
+        let unknownIndex = try XCTUnwrap(
+            threads.firstIndex { $0["id"] as? String == unknown.id.uuidString }
+        )
+        threads[legacyIndex].removeValue(forKey: "reviewMode")
+        threads[unknownIndex]["reviewMode"] = "someFutureMode"
+        object["threads"] = threads
+        try JSONSerialization.data(withJSONObject: object)
+            .write(to: fixture.paths.stateFile, options: .atomic)
+
+        let reloaded = try ThreadStore(paths: fixture.paths)
+        XCTAssertEqual(reloaded.state.threads.first(where: { $0.id == legacy.id })?.reviewMode, .autoReview)
+        XCTAssertEqual(reloaded.state.threads.first(where: { $0.id == unknown.id })?.reviewMode, .autoReview)
+    }
+
+    @MainActor
+    func testReviewModeMapsToAppServerParameters() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        var thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+
+        let expected: [HarnessReviewMode: (policy: String, reviewer: String, sandbox: String)] = [
+            .autoReview: ("on-request", "auto_review", "workspace-write"),
+            .allowAll: ("never", "user", "danger-full-access"),
+            .denyAll: ("never", "user", "workspace-write")
+        ]
+
+        for mode in HarnessReviewMode.allCases {
+            let want = try XCTUnwrap(expected[mode])
+            thread.reviewMode = mode
+
+            let start = HarnessController.threadStartParameters(for: thread)
+            XCTAssertEqual(start["approvalPolicy"] as? String, want.policy, "\(mode) thread/start")
+            XCTAssertEqual(start["approvalsReviewer"] as? String, want.reviewer, "\(mode) thread/start")
+            XCTAssertEqual(start["sandbox"] as? String, want.sandbox, "\(mode) thread/start")
+
+            // Resume carries a changed mode into every turn after the first.
+            let resume = HarnessController.threadResumeParameters(
+                threadID: "codex-thread",
+                thread: thread
+            )
+            XCTAssertEqual(resume["threadId"] as? String, "codex-thread")
+            XCTAssertEqual(resume["approvalPolicy"] as? String, want.policy, "\(mode) thread/resume")
+            XCTAssertEqual(resume["approvalsReviewer"] as? String, want.reviewer, "\(mode) thread/resume")
+            XCTAssertEqual(resume["sandbox"] as? String, want.sandbox, "\(mode) thread/resume")
+
+            let turn = HarnessController.turnStartParameters(
+                threadID: "codex-thread",
+                text: "hello",
+                thread: thread
+            )
+            XCTAssertEqual(turn["approvalPolicy"] as? String, want.policy, "\(mode) turn/start")
+            XCTAssertEqual(turn["approvalsReviewer"] as? String, want.reviewer, "\(mode) turn/start")
+            // turn/start has no SandboxMode field; thread/start and
+            // thread/resume own the sandbox.
+            XCTAssertNil(turn["sandbox"])
+        }
+
+        // Only 自動監査 routes approvals to the review subagent.
+        XCTAssertEqual(
+            HarnessReviewMode.allCases.filter { $0.approvalsReviewer == "auto_review" },
+            [.autoReview]
+        )
+    }
 }
 
 private struct Fixture {

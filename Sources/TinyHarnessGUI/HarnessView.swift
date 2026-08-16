@@ -425,6 +425,9 @@ private struct ConversationView: View {
                     chooseFolder: { chooseFolder(for: thread) },
                     selectModel: { model, effort in
                         controller.updateModel(model, reasoningEffort: effort, for: thread.id)
+                    },
+                    selectReviewMode: { mode in
+                        controller.updateReviewMode(mode, for: thread.id)
                     }
                 )
 
@@ -555,6 +558,7 @@ private struct ConversationHeader: View {
     let back: () -> Void
     let chooseFolder: () -> Void
     let selectModel: (String, String) -> Void
+    let selectReviewMode: (HarnessReviewMode) -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -600,7 +604,12 @@ private struct ConversationHeader: View {
                 .accessibilityLabel("作業フォルダ: \(thread.workingDirectory)")
 
                 Spacer(minLength: 3)
-                ModelPicker(controller: controller, thread: thread, select: selectModel)
+                ThreadOptionsRow(
+                    controller: controller,
+                    thread: thread,
+                    selectModel: selectModel,
+                    selectReviewMode: selectReviewMode
+                )
             }
             .padding(.horizontal, 13)
             .frame(height: 24)
@@ -612,20 +621,45 @@ private struct ConversationHeader: View {
     }
 }
 
-private struct ModelPicker: View {
+/// The per-thread settings that sit above the composer: review mode, model and
+/// reasoning effort. They read as one quiet line of metadata, but each item is
+/// its own menu, so nothing carries a disclosure indicator.
+private struct ThreadOptionsRow: View {
     @ObservedObject var controller: HarnessController
     let thread: HarnessThread
-    let select: (String, String) -> Void
+    let selectModel: (String, String) -> Void
+    let selectReviewMode: (HarnessReviewMode) -> Void
 
     var body: some View {
         HStack(spacing: 3) {
+            Menu {
+                ForEach(HarnessReviewMode.allCases) { mode in
+                    Button {
+                        selectReviewMode(mode)
+                    } label: {
+                        choiceLabel(mode.displayName, selected: mode == thread.reviewMode)
+                    }
+                }
+            } label: {
+                optionLabel(thread.reviewMode.displayName)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("承認: \(thread.reviewMode.displayName) — \(thread.reviewMode.summary)")
+            .accessibilityLabel(
+                "承認モード \(thread.reviewMode.displayName)、\(thread.reviewMode.summary)。クリックして変更"
+            )
+
+            separator
+
             Menu {
                 ForEach(controller.availableModels) { option in
                     Button {
                         let effort = option.supportedReasoningEfforts.contains(thread.reasoningEffort)
                             ? thread.reasoningEffort
                             : option.supportedReasoningEfforts.first ?? HarnessController.defaultEffort
-                        select(option.id, effort)
+                        selectModel(option.id, effort)
                     } label: {
                         choiceLabel(
                             HarnessController.modelNickname(option.id),
@@ -634,11 +668,7 @@ private struct ModelPicker: View {
                     }
                 }
             } label: {
-                Text(HarnessController.modelNickname(thread.model))
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .frame(height: 24)
-                    .contentShape(Rectangle())
+                optionLabel(HarnessController.modelNickname(thread.model))
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -646,24 +676,18 @@ private struct ModelPicker: View {
             .help("モデル: \(thread.model)")
             .accessibilityLabel("モデル \(thread.model)。クリックして変更")
 
-            Text("·")
-                .font(.system(size: 9.5, design: .monospaced))
-                .foregroundStyle(.tertiary)
+            separator
 
             Menu {
                 ForEach(controller.reasoningEfforts(for: thread.model), id: \.self) { effort in
                     Button {
-                        select(thread.model, effort)
+                        selectModel(thread.model, effort)
                     } label: {
                         choiceLabel(effort, selected: effort == thread.reasoningEffort)
                     }
                 }
             } label: {
-                Text(thread.reasoningEffort)
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .frame(height: 24)
-                    .contentShape(Rectangle())
+                optionLabel(thread.reasoningEffort)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -672,6 +696,20 @@ private struct ModelPicker: View {
             .accessibilityLabel("推論 \(thread.reasoningEffort)。クリックして変更")
         }
         .padding(.horizontal, 5)
+    }
+
+    private var separator: some View {
+        Text("·")
+            .font(.system(size: 9.5, design: .monospaced))
+            .foregroundStyle(.tertiary)
+    }
+
+    private func optionLabel(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 9.5, design: .monospaced))
+            .foregroundStyle(.tertiary)
+            .frame(height: 24)
+            .contentShape(Rectangle())
     }
 
     @ViewBuilder

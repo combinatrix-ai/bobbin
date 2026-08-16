@@ -159,6 +159,17 @@ public final class HarnessController: ObservableObject {
         }
     }
 
+    /// Takes effect on the next turn: the running turn keeps the policy it
+    /// started with.
+    public func updateReviewMode(_ mode: HarnessReviewMode, for id: UUID) {
+        do {
+            try store.update(id) { $0.reviewMode = mode }
+            objectWillChange.send()
+        } catch {
+            report(error)
+        }
+    }
+
     public func updateDefaultModel(_ model: String) {
         guard let option = availableModels.first(where: { $0.id == model }) else { return }
         let currentEffort = store.state.defaultReasoningEffort
@@ -226,9 +237,26 @@ public final class HarnessController: ObservableObject {
         [
             "model": thread.model,
             "cwd": thread.workingDirectory,
-            "approvalPolicy": "never",
-            "sandbox": "workspace-write",
+            "approvalPolicy": thread.reviewMode.approvalPolicy,
+            "approvalsReviewer": thread.reviewMode.approvalsReviewer,
+            "sandbox": thread.reviewMode.sandboxMode,
             "serviceName": "tiny_harness_gui"
+        ]
+    }
+
+    /// Every turn after the first resumes the app-server thread, so resume is
+    /// where a changed review mode reaches the sandbox: `thread/resume` takes a
+    /// `SandboxMode` string, while `turn/start` only accepts the differently
+    /// shaped `sandboxPolicy` object.
+    static func threadResumeParameters(
+        threadID: String,
+        thread: HarnessThread
+    ) -> [String: Any] {
+        [
+            "threadId": threadID,
+            "approvalPolicy": thread.reviewMode.approvalPolicy,
+            "approvalsReviewer": thread.reviewMode.approvalsReviewer,
+            "sandbox": thread.reviewMode.sandboxMode
         ]
     }
 
@@ -241,7 +269,8 @@ public final class HarnessController: ObservableObject {
             "threadId": threadID,
             "input": [["type": "text", "text": text]],
             "cwd": thread.workingDirectory,
-            "approvalPolicy": "never",
+            "approvalPolicy": thread.reviewMode.approvalPolicy,
+            "approvalsReviewer": thread.reviewMode.approvalsReviewer,
             "model": thread.model,
             "effort": thread.reasoningEffort
         ]
@@ -418,7 +447,10 @@ public final class HarnessController: ObservableObject {
                 }
                 _ = try await client.request(
                     method: "thread/resume",
-                    params: ["threadId": existingThreadID]
+                    params: Self.threadResumeParameters(
+                        threadID: existingThreadID,
+                        thread: thread
+                    )
                 )
             }
 
