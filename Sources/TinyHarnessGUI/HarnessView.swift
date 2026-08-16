@@ -7,6 +7,10 @@ import TinyHarnessCore
 /// The list is intentionally the landing view. A thread is opened as a
 /// separate, focused conversation so the popover does not keep two dense
 /// panes visible at once.
+///
+/// The popover does not introduce itself: there is no wordmark, badge or
+/// standing health light. The only fixed chrome is a quiet strip of actions
+/// pinned top-right, shared by both views.
 struct HarnessView: View {
     @ObservedObject var controller: HarnessController
     @ObservedObject var store: ThreadStore
@@ -15,7 +19,9 @@ struct HarnessView: View {
     @State private var conversationID: UUID?
 
     var body: some View {
-        Group {
+        VStack(spacing: 0) {
+            TopStrip(controller: controller, create: createThread)
+
             if showingConversation, let conversationID {
                 ConversationView(
                     controller: controller,
@@ -32,6 +38,7 @@ struct HarnessView: View {
                 )
             }
         }
+        .background(.regularMaterial)
         .onAppear {
             // The menu-bar popover always opens on the lightweight index.
             // The selected ID remains persisted by ThreadStore for the next
@@ -79,15 +86,11 @@ private struct ThreadListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            ListHeader(controller: controller, create: create)
-
-            if case .stopped(let detail) = controller.serverState {
-                ServerBanner(
-                    detail: detail,
-                    showingDetail: $showingServerDetail,
-                    restart: controller.restart
-                )
-            }
+            ServerBanner(
+                notice: controller.serverState.notice,
+                showingDetail: $showingServerDetail,
+                restart: controller.restart
+            )
 
             ScrollView {
                 LazyVStack(spacing: 1) {
@@ -118,32 +121,21 @@ private struct ThreadListView: View {
             }
             .scrollIndicators(.automatic)
         }
-        .background(.regularMaterial)
     }
 }
 
-private struct ListHeader: View {
+/// The only fixed chrome: two icon-only actions pinned to the top-right.
+///
+/// No wordmark, no badge, no logo and no standing status light — the user just
+/// clicked the mark in the menu bar, so the popover does not repeat itself, and
+/// a healthy server says nothing at all.
+private struct TopStrip: View {
     @ObservedObject var controller: HarnessController
     let create: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
-            Text("ti")
-                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                .tracking(-0.6)
-                .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-                .frame(width: 21, height: 19)
-                .background(.primary, in: RoundedRectangle(cornerRadius: 5))
-
-            Text("Tiny Harness")
-                .font(.system(size: 12.5, weight: .semibold))
-
-            Circle()
-                .fill(statusColor)
-                .frame(width: 6, height: 6)
-                .accessibilityLabel(controller.serverState.label)
-
-            Spacer(minLength: 4)
+        HStack(spacing: 2) {
+            Spacer(minLength: 0)
 
             Button(action: create) {
                 Image(systemName: "plus")
@@ -186,8 +178,11 @@ private struct ListHeader: View {
                 }
 
                 Divider()
-                Text("Auth: \(authenticationLabel)")
+                // Status lives here, on demand, rather than as a permanent
+                // light on the main surface.
+                Text("Server: \(controller.serverState.settingsLabel)")
                 Button("Restart app-server", action: controller.restart)
+                Text("Auth: \(authenticationLabel)")
                 Divider()
                 Button("Quit Tiny Harness") {
                     NSApplication.shared.terminate(nil)
@@ -203,17 +198,11 @@ private struct ListHeader: View {
             .help("Settings")
             .accessibilityLabel("Settings")
         }
-        .padding(.horizontal, 12)
-        .frame(height: 42)
-        .overlay(alignment: .bottom) { Divider() }
-    }
-
-    private var statusColor: Color {
-        switch controller.serverState {
-        case .starting: .secondary
-        case .ready: .green
-        case .stopped: .red
-        }
+        .padding(.horizontal, 8)
+        .padding(.top, 4)
+        // Top-aligned so the controls sit 4pt from the edge as drawn, rather
+        // than floating in the middle of the strip.
+        .frame(height: 34, alignment: .top)
     }
 
     private var authenticationLabel: String {
@@ -231,49 +220,77 @@ private struct ListHeader: View {
     }
 }
 
+/// Renders nothing at all while the app-server is healthy.
+///
+/// Both the list and the conversation embed one of these, so an actionable
+/// state reaches the user wherever they happen to be.
 private struct ServerBanner: View {
-    let detail: String
+    let notice: ServerNotice
     @Binding var showingDetail: Bool
     let restart: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
+        switch notice {
+        case .none:
+            EmptyView()
+        case .restarting:
             HStack(spacing: 7) {
-                Circle().fill(.red).frame(width: 6, height: 6)
-                Text("Server stopped")
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.62)
+                    .frame(width: 10, height: 10)
+                Text("Restarting app-server…")
                     .font(.system(size: 10.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                if !detail.isEmpty {
-                    Button(showingDetail ? "Hide" : "Details") {
-                        withAnimation(.easeOut(duration: 0.12)) {
-                            showingDetail.toggle()
-                        }
-                    }
-                    .font(.system(size: 10, weight: .medium))
-                    .buttonStyle(.plain)
-                }
-                Button("Restart", action: restart)
-                    .font(.system(size: 10, weight: .semibold))
-                    .buttonStyle(.plain)
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            .background(Color.primary.opacity(0.055), in: RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 8)
+            .padding(.top, 2)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Restarting app-server")
+        case .stopped(let detail):
+            VStack(spacing: 0) {
+                HStack(spacing: 7) {
+                    Circle().fill(.red).frame(width: 6, height: 6)
+                    Text("Server stopped")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    if !detail.isEmpty {
+                        Button(showingDetail ? "Hide" : "Details") {
+                            withAnimation(.easeOut(duration: 0.12)) {
+                                showingDetail.toggle()
+                            }
+                        }
+                        .font(.system(size: 10, weight: .medium))
+                        .buttonStyle(.plain)
+                    }
+                    Button("Restart", action: restart)
+                        .font(.system(size: 10, weight: .semibold))
+                        .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
 
-            if showingDetail, !detail.isEmpty {
-                Text(detail)
-                    .font(.system(size: 9, design: .monospaced))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
+                if showingDetail, !detail.isEmpty {
+                    Text(detail)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                }
             }
+            .padding(.horizontal, 8)
+            .padding(.top, 2)
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 6)
     }
 }
 
@@ -303,9 +320,10 @@ private struct SavedSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             HStack(spacing: 6) {
-                Text("Saved")
+                Text("SAVED")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
+                    .tracking(0.2)
+                    .foregroundStyle(.tertiary)
                 Spacer()
             }
             .padding(.top, 9)
@@ -340,7 +358,7 @@ private struct ThreadRow: View {
                 HStack(spacing: 7) {
                     if thread.status == .running {
                         Circle()
-                            .fill(.green)
+                            .fill(Color.harnessAccent)
                             .frame(width: 6, height: 6)
                             .accessibilityLabel("Running")
                     }
@@ -370,7 +388,7 @@ private struct ThreadRow: View {
             Button(action: save) {
                 Image(systemName: thread.isSaved ? "star.fill" : "star")
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(thread.isSaved ? Color.green : Color.secondary)
+                    .foregroundStyle(thread.isSaved ? Color.harnessAccent : Color.secondary)
                     .frame(width: 25, height: 25)
                     .contentShape(Rectangle())
             }
@@ -431,19 +449,16 @@ private struct ConversationView: View {
                     }
                 )
 
-                if case .stopped(let detail) = controller.serverState {
-                    ServerBanner(
-                        detail: detail,
-                        showingDetail: $showingServerDetail,
-                        restart: controller.restart
-                    )
-                }
+                ServerBanner(
+                    notice: controller.serverState.notice,
+                    showingDetail: $showingServerDetail,
+                    restart: controller.restart
+                )
 
                 Divider()
                 messageList(thread)
                 composer(thread)
             }
-            .background(.regularMaterial)
         } else {
             Color.clear.onAppear(perform: back)
         }
@@ -506,7 +521,7 @@ private struct ConversationView: View {
             .buttonStyle(.plain)
             .disabled(thread.status == .running ? false : isPromptEmpty || controller.serverState != .ready)
             .opacity(thread.status == .running || !isPromptEmpty ? 1 : 0.3)
-            .help(thread.status == .running ? "Stop generating" : "Send")
+            .help(sendHelp(thread))
             .accessibilityLabel(thread.status == .running ? "Stop generating" : "Send")
             .keyboardShortcut(.return, modifiers: .command)
         }
@@ -514,6 +529,13 @@ private struct ConversationView: View {
         .padding(.top, 8)
         .padding(.bottom, 10)
         .overlay(alignment: .top) { Divider() }
+    }
+
+    /// Explains the disabled send button rather than leaving it inert and
+    /// unlabelled while the app-server is unavailable.
+    private func sendHelp(_ thread: HarnessThread) -> String {
+        if thread.status == .running { return "Stop generating" }
+        return controller.serverState.isHealthy ? "Send" : "Unavailable until the app-server is ready"
     }
 
     /// Restrained ceiling for the composer inside a 392x560 popover: past this
@@ -581,7 +603,7 @@ private struct ConversationHeader: View {
                 Button(action: save) {
                     Image(systemName: thread.isSaved ? "star.fill" : "star")
                         .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(thread.isSaved ? Color.green : Color.secondary)
+                        .foregroundStyle(thread.isSaved ? Color.harnessAccent : Color.secondary)
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
@@ -590,7 +612,7 @@ private struct ConversationHeader: View {
                 .accessibilityLabel(thread.isSaved ? "Saved" : "Save thread")
             }
             .padding(.horizontal, 7)
-            .frame(height: 40)
+            .frame(height: 38)
 
             HStack(spacing: 7) {
                 Button(action: chooseFolder) {

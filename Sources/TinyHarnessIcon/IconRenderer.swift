@@ -233,4 +233,25 @@ extension IconRenderer {
         image.isTemplate = true
         return image
     }
+
+    /// The full-colour mark, for the one in-app surface that earns it: the
+    /// Connect pane. Not a template — it keeps the icon's own palette.
+    public static func markImage(
+        pointSize: CGFloat,
+        spec: AppIconSpec = .standard
+    ) -> NSImage {
+        NSImage(size: NSSize(width: pointSize, height: pointSize), flipped: false) { rect in
+            guard let context = NSGraphicsContext.current?.cgContext else { return false }
+            context.translateBy(x: 0, y: rect.height)
+            context.scaleBy(x: 1, y: -1)
+            drawMark(
+                in: context,
+                fitting: rect,
+                spec: spec.mark,
+                loopColor: spec.loopColor,
+                coreColor: spec.coreColor
+            )
+            return true
+        }
+    }
 }

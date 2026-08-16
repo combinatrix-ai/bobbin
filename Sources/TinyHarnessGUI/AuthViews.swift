@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TinyHarnessIcon
 
 struct APIKeyChoiceView: View {
     let source: String
@@ -61,11 +62,9 @@ struct DeviceAuthView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            Text("ti")
-                .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-                .frame(width: 42, height: 42)
-                .background(.primary, in: RoundedRectangle(cornerRadius: 11))
+            // The one place inside the app that shows the mark: an
+            // unconfigured session has nothing else to identify itself with.
+            ConnectMark()
 
             Text("Connect to Codex")
                 .font(.system(size: 15, weight: .semibold))
@@ -105,6 +104,22 @@ struct DeviceAuthView: View {
         }
         .padding(28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// The app icon's own plate and mark, reused at popover scale so the Connect
+/// pane matches what the user sees in the Dock.
+private struct ConnectMark: View {
+    var body: some View {
+        Image(nsImage: IconRenderer.markImage(pointSize: 26))
+            .frame(width: 48, height: 48)
+            .background(plateColor, in: RoundedRectangle(cornerRadius: 13))
+            .accessibilityHidden(true)
+    }
+
+    private var plateColor: Color {
+        let plate = AppIconSpec.standard.plateColor
+        return Color(red: plate.red, green: plate.green, blue: plate.blue)
     }
 }
 

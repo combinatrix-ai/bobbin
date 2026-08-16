@@ -17,6 +17,14 @@ struct RootView: View {
                 LoadingView()
             case .ready:
                 authenticatedContent
+            case .restarting:
+                // A restart is progress, not a failure: the thread surface
+                // stays up and HarnessView shows the quiet inline notice.
+                if controller.authState.isAuthenticated {
+                    HarnessView(controller: controller, store: store)
+                } else {
+                    LoadingView()
+                }
             case .stopped:
                 // Once authenticated, keep the thread index visible and
                 // surface the failure as the compact inline banner owned by

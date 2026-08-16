@@ -15,17 +15,36 @@ public final class HarnessController: ObservableObject {
     }
 
     public enum ServerState: Equatable {
+        /// First boot, before anything is on screen.
         case starting
         case ready
+        /// An explicit restart of an already-running session. Distinct from
+        /// `starting` because the thread surface stays up throughout.
+        case restarting
         case stopped(String)
 
-        public var label: String {
+        /// What, if anything, the main surface should surface. Healthy is
+        /// silent; only actionable states produce a notice.
+        public var notice: ServerNotice {
             switch self {
-            case .starting: "Starting app server"
-            case .ready: "App server ready"
-            case .stopped: "App server stopped"
+            case .starting, .ready: .none
+            case .restarting: .restarting
+            case .stopped(let detail): .stopped(detail: detail)
             }
         }
+
+        /// The on-demand reading shown inside Settings, where the user has
+        /// asked for it.
+        public var settingsLabel: String {
+            switch self {
+            case .starting: "Starting…"
+            case .ready: "Healthy"
+            case .restarting: "Restarting…"
+            case .stopped: "Stopped"
+            }
+        }
+
+        public var isHealthy: Bool { self == .ready }
     }
 
     public enum AuthState: Equatable {
@@ -78,8 +97,11 @@ public final class HarnessController: ObservableObject {
     public func restart() {
         client?.stop()
         client = nil
-        serverState = .starting
-        authState = .checking
+        serverState = .restarting
+        // An authenticated session keeps its auth state so the thread surface
+        // stays up behind the quiet restarting notice. Only an unresolved
+        // session falls back to the full-pane checking view.
+        if !authState.isAuthenticated { authState = .checking }
         modelVerified = false
         availableModels = []
         boot()

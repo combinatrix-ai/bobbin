@@ -250,6 +250,18 @@ public enum AuthenticationMode: String, Codable, Sendable {
     case apiKey = "API key"
 }
 
+/// What the main surface should say about the app-server, if anything.
+///
+/// A healthy server is deliberately `none`: a permanent "everything is fine"
+/// indicator is noise, so state is surfaced only when it is actionable.
+public enum ServerNotice: Equatable, Sendable {
+    case none
+    case restarting
+    case stopped(detail: String)
+
+    public var isSilent: Bool { self == .none }
+}
+
 public enum HarnessError: LocalizedError, Equatable {
     case codexNotFound
     case appServerStopped(String)

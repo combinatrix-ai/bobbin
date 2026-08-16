@@ -337,6 +337,64 @@ final class ThreadStoreTests: XCTestCase {
             [.autoReview]
         )
     }
+
+    // MARK: - Server state presentation
+
+    @MainActor
+    func testHealthyServerSaysNothingOnTheMainSurface() {
+        // The whole point of the simplified popover: no standing "everything
+        // is fine" indicator.
+        XCTAssertEqual(HarnessController.ServerState.ready.notice, .none)
+        XCTAssertTrue(HarnessController.ServerState.ready.notice.isSilent)
+        XCTAssertTrue(HarnessController.ServerState.ready.isHealthy)
+
+        // First boot is covered by the full-pane loading view, so it must not
+        // also raise a banner.
+        XCTAssertEqual(HarnessController.ServerState.starting.notice, .none)
+    }
+
+    @MainActor
+    func testOnlyActionableServerStatesRaiseANotice() {
+        XCTAssertEqual(HarnessController.ServerState.restarting.notice, .restarting)
+        XCTAssertEqual(
+            HarnessController.ServerState.stopped("exit status 1").notice,
+            .stopped(detail: "exit status 1")
+        )
+
+        // The detail travels with the notice so the banner can offer Details.
+        guard case .stopped(let detail) = HarnessController.ServerState.stopped("boom").notice else {
+            return XCTFail("a stopped server must carry its detail")
+        }
+        XCTAssertEqual(detail, "boom")
+
+        for state in [
+            HarnessController.ServerState.restarting,
+            .stopped(""),
+            .stopped("detail")
+        ] {
+            XCTAssertFalse(state.notice.isSilent, "\(state) must be surfaced")
+            XCTAssertFalse(state.isHealthy, "\(state) is not healthy")
+        }
+    }
+
+    @MainActor
+    func testSettingsExposesServerStatusOnDemand() {
+        XCTAssertEqual(HarnessController.ServerState.ready.settingsLabel, "Healthy")
+        XCTAssertEqual(HarnessController.ServerState.restarting.settingsLabel, "Restarting…")
+        XCTAssertEqual(HarnessController.ServerState.stopped("x").settingsLabel, "Stopped")
+        XCTAssertEqual(HarnessController.ServerState.starting.settingsLabel, "Starting…")
+    }
+
+    @MainActor
+    func testRestartingIsDistinctFromFirstBoot() {
+        // They must not collapse: first boot replaces the whole surface, a
+        // restart keeps it and shows an inline notice instead.
+        XCTAssertNotEqual(HarnessController.ServerState.restarting, .starting)
+        XCTAssertNotEqual(
+            HarnessController.ServerState.restarting.notice,
+            HarnessController.ServerState.starting.notice
+        )
+    }
 }
 
 private struct Fixture {
