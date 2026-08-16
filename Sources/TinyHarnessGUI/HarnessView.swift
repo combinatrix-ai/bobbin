@@ -221,11 +221,11 @@ private struct ListHeader: View {
         return "未接続"
     }
 
+    @ViewBuilder
     private func settingsChoiceLabel(_ title: String, selected: Bool) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: "checkmark")
-                .opacity(selected ? 1 : 0)
-                .frame(width: 12)
+        if selected {
+            Label(title, systemImage: "checkmark")
+        } else {
             Text(title)
         }
     }
@@ -607,8 +607,8 @@ private struct ModelPicker: View {
     let select: (String, String) -> Void
 
     var body: some View {
-        Menu {
-            Section("モデル") {
+        HStack(spacing: 3) {
+            Menu {
                 ForEach(controller.availableModels) { option in
                     Button {
                         let effort = option.supportedReasoningEfforts.contains(thread.reasoningEffort)
@@ -622,9 +622,24 @@ private struct ModelPicker: View {
                         )
                     }
                 }
+            } label: {
+                Text(HarnessController.modelNickname(thread.model))
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .frame(height: 24)
+                    .contentShape(Rectangle())
             }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("モデル: \(thread.model)")
+            .accessibilityLabel("モデル \(thread.model)。クリックして変更")
 
-            Section("推論") {
+            Text("·")
+                .font(.system(size: 9.5, design: .monospaced))
+                .foregroundStyle(.tertiary)
+
+            Menu {
                 ForEach(controller.reasoningEfforts(for: thread.model), id: \.self) { effort in
                     Button {
                         select(thread.model, effort)
@@ -632,33 +647,27 @@ private struct ModelPicker: View {
                         choiceLabel(effort, selected: effort == thread.reasoningEffort)
                     }
                 }
-            }
-        } label: {
-            HStack(spacing: 3) {
-                Text("\(HarnessController.modelNickname(thread.model)) · \(thread.reasoningEffort)")
+            } label: {
+                Text(thread.reasoningEffort)
                     .font(.system(size: 9.5, design: .monospaced))
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 7, weight: .semibold))
+                    .foregroundStyle(.tertiary)
+                    .frame(height: 24)
+                    .contentShape(Rectangle())
             }
-            .foregroundStyle(.tertiary)
-            .padding(.horizontal, 5)
-            .frame(height: 24)
-            .contentShape(Rectangle())
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("reasoning: \(thread.reasoningEffort)")
+            .accessibilityLabel("推論 \(thread.reasoningEffort)。クリックして変更")
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("モデル: \(thread.model) · reasoning \(thread.reasoningEffort)")
-        .accessibilityLabel(
-            "モデル \(thread.model)、推論 \(thread.reasoningEffort)。クリックして変更"
-        )
+        .padding(.horizontal, 5)
     }
 
+    @ViewBuilder
     private func choiceLabel(_ title: String, selected: Bool) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: "checkmark")
-                .opacity(selected ? 1 : 0)
-                .frame(width: 12)
+        if selected {
+            Label(title, systemImage: "checkmark")
+        } else {
             Text(title)
         }
     }
