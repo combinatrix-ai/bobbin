@@ -170,6 +170,53 @@ final class ThreadStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testNewThreadDefaultsToHomeUnlessDirectoryIsSupplied() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+        XCTAssertEqual(HarnessThread.defaultWorkingDirectory, home)
+        XCTAssertTrue(home.hasPrefix("/"))
+
+        // No directory supplied: the home directory, never a remembered one.
+        XCTAssertEqual(HarnessController.resolvedWorkingDirectory(nil), home)
+        XCTAssertEqual(HarnessController.resolvedWorkingDirectory("  "), home)
+
+        // An explicit directory always wins.
+        XCTAssertEqual(HarnessController.resolvedWorkingDirectory("/tmp/project"), "/tmp/project")
+    }
+
+    @MainActor
+    func testLegacyLastWorkingDirectoryIsDroppedAndDoesNotMoveThreads() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let existing = try fixture.store.createThread(workingDirectory: "/tmp/project")
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(contentsOf: fixture.paths.stateFile)
+            ) as? [String: Any]
+        )
+        object["lastWorkingDirectory"] = "/Users/legacy/Documents"
+        try JSONSerialization.data(withJSONObject: object)
+            .write(to: fixture.paths.stateFile, options: .atomic)
+
+        let reloaded = try ThreadStore(paths: fixture.paths)
+        // The old thread keeps its own directory.
+        XCTAssertEqual(
+            reloaded.state.threads.first(where: { $0.id == existing.id })?.workingDirectory,
+            "/tmp/project"
+        )
+
+        // A new thread ignores the persisted value entirely...
+        let fresh = try reloaded.createThread(
+            workingDirectory: HarnessController.resolvedWorkingDirectory(nil)
+        )
+        XCTAssertEqual(fresh.workingDirectory, HarnessThread.defaultWorkingDirectory)
+
+        // ...and the obsolete key is gone from the rewritten state file.
+        let rawState = try String(contentsOf: fixture.paths.stateFile, encoding: .utf8)
+        XCTAssertFalse(rawState.contains("lastWorkingDirectory"))
+    }
+
+    @MainActor
     func testModelSelectionIsForwardedToAppServerRequests() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

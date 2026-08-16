@@ -59,6 +59,13 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     public static let defaultModel = "gpt-5.6-luna"
     public static let defaultReasoningEffort = "xhigh"
 
+    /// Working directory for a new thread when the caller does not supply one.
+    /// Deliberately computed from the current user's home each time rather than
+    /// persisted, so no stale default can survive in the state file.
+    public static var defaultWorkingDirectory: String {
+        FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+    }
+
     public let id: UUID
     public var codexThreadID: String?
     public var activeTurnID: String?
@@ -133,20 +140,17 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
 public struct PersistedState: Codable, Equatable, Sendable {
     public var threads: [HarnessThread]
     public var selectedThreadID: UUID?
-    public var lastWorkingDirectory: String?
     public var defaultModel: String
     public var defaultReasoningEffort: String
 
     public init(
         threads: [HarnessThread] = [],
         selectedThreadID: UUID? = nil,
-        lastWorkingDirectory: String? = nil,
         defaultModel: String = HarnessThread.defaultModel,
         defaultReasoningEffort: String = HarnessThread.defaultReasoningEffort
     ) {
         self.threads = threads
         self.selectedThreadID = selectedThreadID
-        self.lastWorkingDirectory = lastWorkingDirectory
         self.defaultModel = defaultModel
         self.defaultReasoningEffort = defaultReasoningEffort
     }
@@ -154,7 +158,6 @@ public struct PersistedState: Codable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case threads
         case selectedThreadID
-        case lastWorkingDirectory
         case defaultModel
         case defaultReasoningEffort
     }
@@ -163,7 +166,8 @@ public struct PersistedState: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         threads = try container.decode([HarnessThread].self, forKey: .threads)
         selectedThreadID = try container.decodeIfPresent(UUID.self, forKey: .selectedThreadID)
-        lastWorkingDirectory = try container.decodeIfPresent(String.self, forKey: .lastWorkingDirectory)
+        // A legacy `lastWorkingDirectory` key is ignored on decode and dropped
+        // on the next write: new threads always start from the home directory.
         defaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel)
             ?? HarnessThread.defaultModel
         defaultReasoningEffort = try container.decodeIfPresent(

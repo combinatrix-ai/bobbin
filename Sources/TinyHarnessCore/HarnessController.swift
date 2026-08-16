@@ -61,9 +61,7 @@ public final class HarnessController: ObservableObject {
         self.keyProvider = keyProvider
 
         if store.state.threads.isEmpty {
-            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-                ?? FileManager.default.homeDirectoryForCurrentUser
-            _ = try store.createThread(workingDirectory: documents.path)
+            _ = try store.createThread(workingDirectory: Self.resolvedWorkingDirectory(nil))
         }
     }
 
@@ -108,10 +106,17 @@ public final class HarnessController: ObservableObject {
         Task { await loginWithAPIKey(trimmed) }
     }
 
+    /// An explicitly supplied directory always wins; otherwise a new thread
+    /// starts in the home directory. No previously used directory is consulted.
+    public static func resolvedWorkingDirectory(_ requested: String?) -> String {
+        guard let requested, !requested.trimmingCharacters(in: .whitespaces).isEmpty else {
+            return HarnessThread.defaultWorkingDirectory
+        }
+        return requested
+    }
+
     public func createThread(workingDirectory: String? = nil) {
-        let cwd = workingDirectory
-            ?? store.state.lastWorkingDirectory
-            ?? FileManager.default.homeDirectoryForCurrentUser.path
+        let cwd = Self.resolvedWorkingDirectory(workingDirectory)
         do {
             _ = try store.createThread(workingDirectory: cwd)
             objectWillChange.send()

@@ -61,7 +61,6 @@ public final class ThreadStore: ObservableObject {
         )
         state.threads.append(thread)
         state.selectedThreadID = thread.id
-        state.lastWorkingDirectory = workingDirectory
         try persist()
         return thread
     }

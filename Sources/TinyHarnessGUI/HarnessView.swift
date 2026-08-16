@@ -685,12 +685,36 @@ private struct ModelPicker: View {
 }
 
 private struct PendingReplyIndicator: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulsing = false
+
     var body: some View {
-        Text("…")
-            .font(.system(size: 12.5))
-            .foregroundStyle(.tertiary)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .accessibilityLabel("応答を待っています")
+        HStack(spacing: 3.5) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(.tertiary)
+                    .frame(width: 4, height: 4)
+                    .opacity(dimmed ? 0.3 : 1)
+                    .scaleEffect(dimmed ? 0.72 : 1)
+                    .animation(animation(delayedBy: index), value: pulsing)
+            }
+        }
+        .frame(height: 15)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("応答を待っています")
+        .onAppear { pulsing = true }
+    }
+
+    /// With Reduce Motion the dots simply sit at rest, which reads as a static
+    /// ellipsis; otherwise they ride the repeating pulse.
+    private var dimmed: Bool { !reduceMotion && !pulsing }
+
+    private func animation(delayedBy index: Int) -> Animation? {
+        guard !reduceMotion else { return nil }
+        return .easeInOut(duration: 0.55)
+            .repeatForever(autoreverses: true)
+            .delay(Double(index) * 0.16)
     }
 }
 
