@@ -1,0 +1,8 @@
+.build/
+.swiftpm/
+.DS_Store
+*.xcuserstate
+
+# Local packaged builds and runtime state
+dist/
+Tiny Harness.app/
