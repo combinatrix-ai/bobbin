@@ -25,6 +25,71 @@ public struct ChatMessage: Codable, Identifiable, Equatable, Sendable {
     }
 }
 
+public enum ToolCallKind: String, Codable, Sendable {
+    case command
+    case fileChange
+    case mcpTool
+    case webSearch
+    case other
+}
+
+public enum ToolCallStatus: String, Codable, Sendable {
+    case running
+    case succeeded
+    case failed
+    case stopped
+}
+
+public struct ToolCall: Codable, Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public let itemID: String
+    public let kind: ToolCallKind
+    public let label: String
+    public var status: ToolCallStatus
+    public var exitCode: Int?
+    public var durationMs: Int?
+    public let createdAt: Date
+
+    public init(
+        id: UUID = UUID(),
+        itemID: String,
+        kind: ToolCallKind,
+        label: String,
+        status: ToolCallStatus,
+        exitCode: Int? = nil,
+        durationMs: Int? = nil,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.itemID = itemID
+        self.kind = kind
+        self.label = label
+        self.status = status
+        self.exitCode = exitCode
+        self.durationMs = durationMs
+        self.createdAt = createdAt
+    }
+}
+
+public enum HarnessTranscriptEntry: Identifiable, Equatable, Sendable {
+    case message(ChatMessage)
+    case toolCall(ToolCall)
+
+    public var id: String {
+        switch self {
+        case .message(let message): "message:\(message.id.uuidString)"
+        case .toolCall(let toolCall): "toolCall:\(toolCall.id.uuidString)"
+        }
+    }
+
+    public var createdAt: Date {
+        switch self {
+        case .message(let message): message.createdAt
+        case .toolCall(let toolCall): toolCall.createdAt
+        }
+    }
+}
+
 public enum HarnessThreadStatus: String, Codable, Sendable {
     case idle
     case running
@@ -149,6 +214,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     public var savedAt: Date?
     public var status: HarnessThreadStatus
     public var messages: [ChatMessage]
+    public var toolCalls: [ToolCall]
 
     public init(
         id: UUID = UUID(),
@@ -163,7 +229,8 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         lastConversationAt: Date = Date(),
         savedAt: Date? = nil,
         status: HarnessThreadStatus = .idle,
-        messages: [ChatMessage] = []
+        messages: [ChatMessage] = [],
+        toolCalls: [ToolCall] = []
     ) {
         self.id = id
         self.codexThreadID = codexThreadID
@@ -178,9 +245,32 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         self.savedAt = savedAt
         self.status = status
         self.messages = messages
+        self.toolCalls = toolCalls
     }
 
     public var isSaved: Bool { savedAt != nil }
+
+    /// The render-time transcript order. Stored messages and tool calls remain
+    /// separate so existing persistence and message handling stay unchanged.
+    /// The source-array index makes equal timestamps deterministic and stable.
+    public var transcriptEntries: [HarnessTranscriptEntry] {
+        let entries = messages.enumerated().map { index, message in
+            (index: index, date: message.createdAt, entry: HarnessTranscriptEntry.message(message))
+        } + toolCalls.enumerated().map { index, toolCall in
+            (
+                index: messages.count + index,
+                date: toolCall.createdAt,
+                entry: HarnessTranscriptEntry.toolCall(toolCall)
+            )
+        }
+
+        return entries
+            .sorted {
+                if $0.date != $1.date { return $0.date < $1.date }
+                return $0.index < $1.index
+            }
+            .map(\.entry)
+    }
 
     private enum CodingKeys: String, CodingKey {
         case id
@@ -196,6 +286,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         case savedAt
         case status
         case messages
+        case toolCalls
     }
 
     public init(from decoder: Decoder) throws {
@@ -218,6 +309,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt)
         status = try container.decode(HarnessThreadStatus.self, forKey: .status)
         messages = try container.decode([ChatMessage].self, forKey: .messages)
+        toolCalls = try container.decodeIfPresent([ToolCall].self, forKey: .toolCalls) ?? []
     }
 }
 

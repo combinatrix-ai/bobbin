@@ -135,10 +135,18 @@ public final class ThreadStore: ObservableObject {
 
     private func normalizeInterruptedRuns() {
         var changed = false
-        for index in state.threads.indices where state.threads[index].status == .running {
-            state.threads[index].status = .stopped
-            state.threads[index].activeTurnID = nil
-            changed = true
+        for index in state.threads.indices {
+            if state.threads[index].status == .running {
+                state.threads[index].status = .stopped
+                state.threads[index].activeTurnID = nil
+                changed = true
+            }
+
+            for toolCallIndex in state.threads[index].toolCalls.indices
+                where state.threads[index].toolCalls[toolCallIndex].status == .running {
+                state.threads[index].toolCalls[toolCallIndex].status = .stopped
+                changed = true
+            }
         }
         if changed { try? persist() }
     }

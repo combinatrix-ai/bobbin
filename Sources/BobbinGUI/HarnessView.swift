@@ -529,8 +529,14 @@ private struct ConversationView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
-                    ForEach(thread.messages) { message in
-                        MessageBubble(message: message).id(message.id)
+                    ForEach(transcriptBlocks(for: thread)) { block in
+                        switch block {
+                        case .message(let message):
+                            MessageBubble(message: message)
+                                .id("message:\(message.id.uuidString)")
+                        case .toolCalls(let toolCalls):
+                            ToolCallGroup(controller: controller, toolCalls: toolCalls)
+                        }
                     }
 
                     // Quiet assistant-side placeholder while the turn is in
@@ -544,14 +550,29 @@ private struct ConversationView: View {
                 .padding(.vertical, 10)
             }
             .scrollIndicators(.automatic)
-            .onChange(of: thread.messages) { _, messages in
-                guard let last = messages.last else { return }
+            .onChange(of: thread.transcriptEntries) { _, entries in
+                guard let last = entries.last else { return }
                 withAnimation(.easeOut(duration: 0.16)) {
                     proxy.scrollTo(last.id, anchor: .bottom)
                 }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func transcriptBlocks(for thread: HarnessThread) -> [TranscriptBlock] {
+        thread.transcriptEntries.reduce(into: [TranscriptBlock]()) { blocks, entry in
+            switch entry {
+            case .message(let message):
+                blocks.append(.message(message))
+            case .toolCall(let toolCall):
+                if case .toolCalls(let existing)? = blocks.last {
+                    blocks[blocks.count - 1] = .toolCalls(existing + [toolCall])
+                } else {
+                    blocks.append(.toolCalls([toolCall]))
+                }
+            }
+        }
     }
 
     private func composer(_ thread: HarnessThread) -> some View {
@@ -802,6 +823,169 @@ private struct ThreadOptionsRow: View {
         } else {
             Text(title)
         }
+    }
+}
+
+private enum TranscriptBlock: Identifiable {
+    case message(ChatMessage)
+    case toolCalls([ToolCall])
+
+    var id: String {
+        switch self {
+        case .message(let message): "message:\(message.id.uuidString)"
+        case .toolCalls(let toolCalls):
+            "toolCalls:\(toolCalls.first?.id.uuidString ?? UUID().uuidString)"
+        }
+    }
+}
+
+private struct ToolCallGroup: View {
+    @ObservedObject var controller: HarnessController
+    let toolCalls: [ToolCall]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(toolCalls) { toolCall in
+                ToolCallRow(
+                    toolCall: toolCall,
+                    output: controller.toolOutput(for: toolCall.itemID)
+                )
+                .id("toolCall:\(toolCall.id.uuidString)")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct ToolCallRow: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulsing = false
+
+    let toolCall: ToolCall
+    let output: String?
+
+    private var hasOutput: Bool { output?.isEmpty == false }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if hasOutput {
+                Button {
+                    withAnimation(.easeOut(duration: 0.12)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    rowContent
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(accessibilityLabel)
+            } else {
+                rowContent
+            }
+
+            if isExpanded, let output {
+                ScrollView(.vertical) {
+                    Text(verbatim: output)
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxHeight: 104, alignment: .top)
+                .padding(.leading, 18)
+                .padding(.vertical, 5)
+                .background(
+                    Color.primary.opacity(0.045),
+                    in: RoundedRectangle(cornerRadius: 5)
+                )
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .onAppear { pulsing = true }
+    }
+
+    @State private var isExpanded = false
+
+    private var rowContent: some View {
+        HStack(spacing: 5) {
+            Image(systemName: glyphName)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 13)
+                .opacity(glyphOpacity)
+                .scaleEffect(glyphScale)
+                .animation(glyphAnimation, value: pulsing)
+                .accessibilityHidden(true)
+
+            Text(verbatim: toolCall.label)
+                .font(
+                    .system(
+                        size: toolCall.kind == .command ? 10.5 : 11,
+                        design: toolCall.kind == .command ? .monospaced : .default
+                    )
+                )
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundStyle(toolCall.status == .running ? Color.primary : Color.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            if let trailingValue {
+                Text(trailingValue)
+                    .font(.system(size: 10, design: .monospaced))
+                    .monospacedDigit()
+                    .foregroundStyle(
+                        toolCall.status == .failed
+                            ? Color.red
+                            : toolCall.status == .running ? Color.primary : Color.secondary
+                    )
+            }
+        }
+        .frame(minHeight: 15, alignment: .center)
+        .contentShape(Rectangle())
+    }
+
+    private var glyphName: String {
+        switch toolCall.kind {
+        case .command: "terminal"
+        case .fileChange: "pencil"
+        case .mcpTool: "hammer"
+        case .webSearch: "magnifyingglass"
+        case .other: "gearshape"
+        }
+    }
+
+    private var glyphOpacity: Double {
+        guard toolCall.status == .running else { return 0.72 }
+        return reduceMotion ? 1 : (pulsing ? 1 : 0.45)
+    }
+
+    private var glyphScale: CGFloat {
+        guard toolCall.status == .running, !reduceMotion else { return 1 }
+        return pulsing ? 1 : 0.88
+    }
+
+    private var glyphAnimation: Animation? {
+        guard toolCall.status == .running, !reduceMotion else { return nil }
+        return .easeInOut(duration: 0.65)
+            .repeatForever(autoreverses: true)
+    }
+
+    private var trailingValue: String? {
+        if toolCall.status == .failed {
+            if let exitCode = toolCall.exitCode { return "exit \(exitCode)" }
+            return "failed"
+        }
+        guard let durationMs = toolCall.durationMs else { return nil }
+        return String(
+            format: "%.1fs",
+            locale: Locale(identifier: "en_US_POSIX"),
+            Double(durationMs) / 1_000
+        )
+    }
+
+    private var accessibilityLabel: String {
+        if isExpanded { return "\(toolCall.label), hide output" }
+        return "\(toolCall.label), show output"
     }
 }
 

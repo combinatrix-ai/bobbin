@@ -72,6 +72,7 @@ public final class HarnessController: ObservableObject {
     private var client: CodexAppServerClient?
     private var pendingAuthMode: AuthenticationMode?
     private var streamingMessages: [String: UUID] = [:]
+    private var toolOutputs: [String: String] = [:]
     private var bootTask: Task<Void, Never>?
 
     public init(paths: HarnessPaths? = nil, keyProvider: APIKeyProvider = APIKeyProvider()) throws {
@@ -87,6 +88,10 @@ public final class HarnessController: ObservableObject {
     public var selectedThread: HarnessThread? { store.selectedThread }
     public var activeThreads: [HarnessThread] { store.activeThreads }
     public var savedThreads: [HarnessThread] { store.savedThreads }
+
+    public func toolOutput(for itemID: String) -> String? {
+        toolOutputs[itemID]
+    }
 
     public func boot() {
         guard client == nil else { return }
@@ -555,7 +560,7 @@ public final class HarnessController: ObservableObject {
         objectWillChange.send()
     }
 
-    private func handleNotification(_ message: [String: Any]) {
+    func handleNotification(_ message: [String: Any]) {
         guard let method = message["method"] as? String else { return }
         let params = message["params"] as? [String: Any] ?? [:]
 
@@ -576,6 +581,9 @@ public final class HarnessController: ObservableObject {
 
         case "item/agentMessage/delta":
             handleAgentDelta(params)
+
+        case "item/started":
+            handleItemStarted(params)
 
         case "item/completed":
             handleItemCompleted(params)
@@ -616,30 +624,176 @@ public final class HarnessController: ObservableObject {
         }
     }
 
-    private func handleItemCompleted(_ params: [String: Any]) {
+    private struct ToolCallInfo {
+        let kind: ToolCallKind
+        let label: String
+    }
+
+    private static func toolCallInfo(from item: [String: Any]) -> ToolCallInfo? {
+        guard let type = item["type"] as? String else { return nil }
+
+        switch type {
+        case "commandExecution":
+            guard let command = item["command"] as? String else { return nil }
+            return ToolCallInfo(kind: .command, label: command)
+
+        case "fileChange":
+            let count = (item["changes"] as? [Any])?.count
+                ?? (item["changes"] as? [[String: Any]])?.count
+                ?? 0
+            return ToolCallInfo(
+                kind: .fileChange,
+                label: count == 1 ? "1 file changed" : "\(count) files changed"
+            )
+
+        case "mcpToolCall":
+            guard
+                let server = item["server"] as? String,
+                let tool = item["tool"] as? String
+            else { return nil }
+            return ToolCallInfo(kind: .mcpTool, label: "\(server) / \(tool)")
+
+        case "webSearch":
+            let query = item["query"] as? String
+            return ToolCallInfo(
+                kind: .webSearch,
+                label: query?.isEmpty == false ? query! : "web search"
+            )
+
+        default:
+            return nil
+        }
+    }
+
+    private func handleItemStarted(_ params: [String: Any]) {
         guard
             let codexThreadID = params["threadId"] as? String,
             let item = params["item"] as? [String: Any],
-            (item["type"] as? String) == "agentMessage",
             let itemID = item["id"] as? String,
-            let text = item["text"] as? String,
+            let info = Self.toolCallInfo(from: item),
             let localThread = store.state.threads.first(where: { $0.codexThreadID == codexThreadID })
         else { return }
 
-        let key = "\(codexThreadID):\(itemID)"
+        guard !localThread.toolCalls.contains(where: { $0.itemID == itemID }) else { return }
+
+        let toolCall = ToolCall(
+            itemID: itemID,
+            kind: info.kind,
+            label: info.label,
+            status: .running,
+            createdAt: Self.date(fromMilliseconds: params["startedAtMs"]) ?? Date()
+        )
+
         do {
-            if let messageID = streamingMessages.removeValue(forKey: key) {
-                try store.update(localThread.id) { thread in
-                    guard let index = thread.messages.firstIndex(where: { $0.id == messageID }) else { return }
-                    thread.messages[index].text = text
-                }
-            } else {
-                try store.update(localThread.id) { $0.messages.append(ChatMessage(role: .assistant, text: text)) }
-            }
+            try store.update(localThread.id) { $0.toolCalls.append(toolCall) }
             objectWillChange.send()
         } catch {
             report(error)
         }
+    }
+
+    private func handleItemCompleted(_ params: [String: Any]) {
+        guard
+            let codexThreadID = params["threadId"] as? String,
+            let item = params["item"] as? [String: Any],
+            let itemID = item["id"] as? String,
+            let localThread = store.state.threads.first(where: { $0.codexThreadID == codexThreadID })
+        else { return }
+
+        switch item["type"] as? String {
+        case "agentMessage":
+            guard let text = item["text"] as? String else { return }
+
+            let key = "\(codexThreadID):\(itemID)"
+            do {
+                if let messageID = streamingMessages.removeValue(forKey: key) {
+                    try store.update(localThread.id) { thread in
+                        guard let index = thread.messages.firstIndex(where: { $0.id == messageID }) else { return }
+                        thread.messages[index].text = text
+                    }
+                } else {
+                    try store.update(localThread.id) { $0.messages.append(ChatMessage(role: .assistant, text: text)) }
+                }
+                objectWillChange.send()
+            } catch {
+                report(error)
+            }
+
+        case "commandExecution", "fileChange", "mcpToolCall", "webSearch":
+            guard let info = Self.toolCallInfo(from: item) else { return }
+
+            let exitCode = Self.intValue(item["exitCode"])
+            let durationMs = Self.intValue(item["durationMs"])
+            let status = Self.toolCallStatus(for: item, exitCode: exitCode)
+            let createdAt = Self.date(fromMilliseconds: params["completedAtMs"]) ?? Date()
+
+            if let output = item["aggregatedOutput"] as? String, !output.isEmpty {
+                toolOutputs[itemID] = Self.truncatedToolOutput(output)
+            } else {
+                toolOutputs.removeValue(forKey: itemID)
+            }
+
+            do {
+                try store.update(localThread.id) { thread in
+                    if let index = thread.toolCalls.firstIndex(where: { $0.itemID == itemID }) {
+                        thread.toolCalls[index].status = status
+                        thread.toolCalls[index].exitCode = exitCode
+                        thread.toolCalls[index].durationMs = durationMs
+                    } else {
+                        thread.toolCalls.append(
+                            ToolCall(
+                                itemID: itemID,
+                                kind: info.kind,
+                                label: info.label,
+                                status: status,
+                                exitCode: exitCode,
+                                durationMs: durationMs,
+                                createdAt: createdAt
+                            )
+                        )
+                    }
+                }
+                objectWillChange.send()
+            } catch {
+                report(error)
+            }
+
+        default:
+            break
+        }
+    }
+
+    private static func toolCallStatus(for item: [String: Any], exitCode: Int?) -> ToolCallStatus {
+        if let exitCode, exitCode != 0 { return .failed }
+        let status = (item["status"] as? String)?.lowercased()
+        if status == "failed" || status == "error" || status == "declined" { return .failed }
+        return .succeeded
+    }
+
+    private static func intValue(_ value: Any?) -> Int? {
+        if let value = value as? Int { return value }
+        if let value = value as? NSNumber { return value.intValue }
+        if let value = value as? String { return Int(value) }
+        return nil
+    }
+
+    private static func date(fromMilliseconds value: Any?) -> Date? {
+        guard let milliseconds = (value as? NSNumber)?.doubleValue
+            ?? (value as? Double)
+            ?? (value as? Int).map(Double.init)
+        else { return nil }
+        return Date(timeIntervalSince1970: milliseconds / 1_000)
+    }
+
+    private static func truncatedToolOutput(_ output: String) -> String {
+        let lastLines = output
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .suffix(200)
+            .joined(separator: "\n")
+        let data = Data(lastLines.utf8)
+        let maxBytes = 32 * 1024
+        guard data.count > maxBytes else { return lastLines }
+        return String(decoding: data.suffix(maxBytes), as: UTF8.self)
     }
 
     private func handleTurnCompleted(_ params: [String: Any]) {
