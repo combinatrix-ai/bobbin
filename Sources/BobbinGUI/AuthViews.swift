@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import TinyHarnessIcon
+import BobbinIcon
 
 struct APIKeyChoiceView: View {
     let source: String

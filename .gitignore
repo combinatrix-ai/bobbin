@@ -7,6 +7,6 @@
 dist/
 Bobbin.app/
 
-# Icon artefacts are generated from Sources/TinyHarnessIcon at package time
+# Icon artefacts are generated from Sources/BobbinIcon at package time
 *.iconset/
 *.icns

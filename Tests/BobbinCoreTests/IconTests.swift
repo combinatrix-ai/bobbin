@@ -1,6 +1,6 @@
 import CoreGraphics
 import XCTest
-@testable import TinyHarnessIcon
+@testable import BobbinIcon
 
 final class IconTests: XCTestCase {
     // MARK: - Geometry

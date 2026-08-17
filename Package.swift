@@ -8,23 +8,23 @@ let package = Package(
     products: [
         // Product names are what land in `.build/<config>/`, so these carry
         // the shipped brand while the target names stay internal.
-        .executable(name: "Bobbin", targets: ["TinyHarnessGUI"]),
-        .executable(name: "bobbin-icon", targets: ["TinyHarnessIconTool"])
+        .executable(name: "Bobbin", targets: ["BobbinGUI"]),
+        .executable(name: "bobbin-icon", targets: ["BobbinIconTool"])
     ],
     targets: [
-        .target(name: "TinyHarnessCore"),
-        .target(name: "TinyHarnessIcon"),
+        .target(name: "BobbinCore"),
+        .target(name: "BobbinIcon"),
         .executableTarget(
-            name: "TinyHarnessGUI",
-            dependencies: ["TinyHarnessCore", "TinyHarnessIcon"]
+            name: "BobbinGUI",
+            dependencies: ["BobbinCore", "BobbinIcon"]
         ),
         .executableTarget(
-            name: "TinyHarnessIconTool",
-            dependencies: ["TinyHarnessIcon"]
+            name: "BobbinIconTool",
+            dependencies: ["BobbinIcon"]
         ),
         .testTarget(
-            name: "TinyHarnessCoreTests",
-            dependencies: ["TinyHarnessCore", "TinyHarnessIcon"]
+            name: "BobbinCoreTests",
+            dependencies: ["BobbinCore", "BobbinIcon"]
         )
     ]
 )

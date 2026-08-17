@@ -20,7 +20,7 @@ cp "$BIN_PATH/Bobbin" "$APP_PATH/Contents/MacOS/Bobbin"
 cp "$PROJECT_DIR/Resources/Info.plist" "$APP_PATH/Contents/Info.plist"
 chmod 755 "$APP_PATH/Contents/MacOS/Bobbin"
 
-# The icon is generated from Sources/TinyHarnessIcon rather than checked in, so
+# The icon is generated from Sources/BobbinIcon rather than checked in, so
 # the bundle can never ship a mark that has drifted from the geometry source.
 ICONSET_DIR="$(mktemp -d)/AppIcon.iconset"
 "$BIN_PATH/bobbin-icon" iconset "$ICONSET_DIR" >/dev/null

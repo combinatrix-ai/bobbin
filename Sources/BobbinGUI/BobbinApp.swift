@@ -1,9 +1,9 @@
 import SwiftUI
-import TinyHarnessCore
-import TinyHarnessIcon
+import BobbinCore
+import BobbinIcon
 
 @main
-struct TinyHarnessApp: App {
+struct BobbinApp: App {
     @StateObject private var controller: HarnessController
 
     init() {

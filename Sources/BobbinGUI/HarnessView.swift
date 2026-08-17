@@ -1,6 +1,6 @@
 import AppKit
 import SwiftUI
-import TinyHarnessCore
+import BobbinCore
 
 /// The authenticated part of the menu-bar popover.
 ///

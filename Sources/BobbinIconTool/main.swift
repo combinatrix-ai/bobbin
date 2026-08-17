@@ -1,6 +1,6 @@
 import AppKit
 import Foundation
-import TinyHarnessIcon
+import BobbinIcon
 
 // Deterministic icon generator. Every artefact the app ships or the reader
 // reviews comes from `MarkSpec`, so the Dock icon, the menu bar glyph, the SVG

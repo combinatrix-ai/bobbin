@@ -1,5 +1,5 @@
 import SwiftUI
-import TinyHarnessCore
+import BobbinCore
 
 struct RootView: View {
     @ObservedObject var controller: HarnessController

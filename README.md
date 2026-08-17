@@ -1,4 +1,8 @@
-# Tiny Harness GUI
+# Bobbin
+
+**Thread lightly.**
+
+Spin up a thread. Keep what matters.
 
 A minimal macOS menu bar client for Codex app-server. It keeps its conversations out of the normal Codex and Claude Code history, defaults to GPT-5.6 Luna with `xhigh` reasoning, and supports multiple disposable threads.
 
@@ -13,31 +17,44 @@ A minimal macOS menu bar client for Codex app-server. It keeps its conversations
   - `Auto review` (default) — `approvalPolicy: on-request`, `approvalsReviewer: auto_review`, sandbox `workspace-write`.
   - `Allow all` — `approvalPolicy: never`, sandbox `danger-full-access`.
   - `Deny all` — `approvalPolicy: never`, sandbox `workspace-write`, approvals never routed to the review subagent.
-- Shows the Tiny Harness mark in the menu bar as a template image, so it tints itself for light and dark menu bars.
+- Shows the Bobbin mark in the menu bar as a template image, so it tints itself for light and dark menu bars.
 - Sorts unsaved threads by last conversation time and fades them as they age.
 - Permanently deletes unsaved app-server threads after seven days.
 - Moves starred or saved threads to the bottom Saved section and exempts them from cleanup.
 
-Runtime data is stored under `~/Library/Application Support/TinyHarness/`. The app's own `state.json` never stores API keys. Codex-managed credentials remain inside the dedicated `CodexHome` directory.
+## Storage
+
+Runtime data is stored under `~/Library/Application Support/Bobbin/`. Nothing there holds an API key, but two independent sets of conversation data accumulate — the app's own `state.json`, and Codex's isolated home under `CodexHome/`:
+
+- `state.json` — threads, including the full text of every user and assistant message.
+- `CodexHome/auth.json` — Codex credentials.
+- `CodexHome/sessions/*.jsonl` — full conversation rollouts.
+- `CodexHome/logs_2.sqlite` — Codex logs.
+- `CodexHome/memories/` — a git repository containing `MEMORY.md`, `raw_memories.md`, and rollout summaries.
+- `CodexHome/state_5.sqlite` — Codex state.
+- `CodexHome/models_cache.json` — Codex's model cache.
+
+The seven-day cleanup calls `thread/delete` and drops the thread from `state.json`, but it does not clear `CodexHome/logs_*.sqlite` or `CodexHome/memories/`. Conversation traces therefore accumulate there regardless of thread cleanup.
 
 ## Build and test
 
 ```sh
+swift build
 swift test
 ./scripts/build-app.sh /path/to/output-directory
 ```
 
-The packaging script creates an ad-hoc signed `Tiny Harness.app`. The app requires macOS 14 or later and a Codex CLI at one of the supported local install paths.
+The packaging script creates an ad-hoc signed `Bobbin.app`. The app requires macOS 14 or later and a Codex CLI at one of the supported local install paths.
 
 ## Icon
 
-The mark is two opposing thick rounded arcs forming an open loop around a small central square. Its geometry lives in `Sources/TinyHarnessIcon` as a single `MarkSpec`, which drives the Dock icon, the menu bar template glyph and the SVG export alike — there is no hand-maintained raster to drift out of step.
+The mark is two opposing thick rounded arcs forming an open loop around a small central square. Its geometry lives in `Sources/BobbinIcon` as a single `MarkSpec`, which drives the Dock icon, the menu bar template glyph and the SVG export alike — there is no hand-maintained raster to drift out of step.
 
 ```sh
-swift run tiny-harness-icon iconset  build/AppIcon.iconset   # app icon renders, 16 → 1024
-swift run tiny-harness-icon template build/menubar           # monochrome menu bar silhouette
-swift run tiny-harness-icon svg      Resources/Icon/TinyHarnessMark.svg
-swift run tiny-harness-icon preview  build/icon-preview.png  # visual-verification sheet
+swift run bobbin-icon iconset  build/AppIcon.iconset   # app icon renders, 16 → 1024
+swift run bobbin-icon template build/menubar           # monochrome menu bar silhouette
+swift run bobbin-icon svg      Resources/Icon/BobbinMark.svg
+swift run bobbin-icon preview  build/icon-preview.png  # visual-verification sheet
 ```
 
 `build-app.sh` regenerates `AppIcon.icns` on every package, then fails the build unless the bundle declares `CFBundleIconFile`, contains a non-empty icon carrying a 1024 px representation, and passes a strict signature check. Generated `.iconset` and `.icns` files are deliberately not committed.

@@ -1,5 +1,5 @@
 import XCTest
-@testable import TinyHarnessCore
+@testable import BobbinCore
 
 final class ThreadStoreTests: XCTestCase {
     @MainActor
