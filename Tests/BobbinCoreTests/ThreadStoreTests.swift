@@ -118,6 +118,80 @@ final class ThreadStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testDefaultSystemPromptIsPersistedAndCapturedByNewThreads() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        try fixture.store.updateSystemPrompt("Keep replies focused.")
+        let thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+
+        XCTAssertEqual(thread.systemPrompt, "Keep replies focused.")
+
+        let reloaded = try ThreadStore(paths: fixture.paths)
+        XCTAssertEqual(reloaded.state.defaultSystemPrompt, "Keep replies focused.")
+    }
+
+    @MainActor
+    func testFreshPersistedStateCarriesTheDefaultSystemPrompt() {
+        let state = PersistedState()
+        let expected = """
+        You are answering inside Bobbin, a macOS menu bar popover roughly 390 points wide.
+
+        - Lead with the answer. Add context afterwards, and only when it changes what to do.
+        - Keep replies short enough to read without scrolling — usually a few sentences.
+        - Avoid wide tables and long code blocks; they wrap badly at this width. Show only the lines that changed.
+        - Reply in the language the user writes in.
+
+        Brevity applies to the reply, not to the work. Take as long as you need on tools, files and reasoning.
+        """
+
+        XCTAssertEqual(HarnessThread.defaultSystemPrompt, expected)
+        XCTAssertEqual(state.defaultSystemPrompt, expected)
+    }
+
+    @MainActor
+    func testNewThreadInheritsTheCurrentDefaultSystemPrompt() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        try fixture.store.updateSystemPrompt("The current default")
+        let thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+
+        XCTAssertEqual(thread.systemPrompt, "The current default")
+    }
+
+    @MainActor
+    func testChangingDefaultSystemPromptDoesNotChangeExistingThreads() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        try fixture.store.updateSystemPrompt("First prompt")
+        let existing = try fixture.store.createThread(workingDirectory: "/tmp/existing")
+
+        try fixture.store.updateSystemPrompt("Second prompt")
+        let fresh = try fixture.store.createThread(workingDirectory: "/tmp/fresh")
+
+        let storedExisting = try XCTUnwrap(
+            fixture.store.state.threads.first(where: { $0.id == existing.id })
+        )
+        XCTAssertEqual(storedExisting.systemPrompt, "First prompt")
+        XCTAssertEqual(fresh.systemPrompt, "Second prompt")
+    }
+
+    @MainActor
+    func testClearingSystemPromptPersistsAsEmptyAcrossReload() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        try fixture.store.updateSystemPrompt("")
+        let reloaded = try ThreadStore(paths: fixture.paths)
+
+        XCTAssertEqual(reloaded.state.defaultSystemPrompt, "")
+        let thread = try reloaded.createThread(workingDirectory: "/tmp/project")
+        XCTAssertEqual(thread.systemPrompt, "")
+    }
+
+    @MainActor
     func testModelCatalogUsesAppServerModelsAndEfforts() {
         let options = HarnessController.modelOptions(from: [
             [
@@ -155,9 +229,11 @@ final class ThreadStoreTests: XCTestCase {
         var threads = try XCTUnwrap(object["threads"] as? [[String: Any]])
         threads[0].removeValue(forKey: "model")
         threads[0].removeValue(forKey: "reasoningEffort")
+        threads[0].removeValue(forKey: "systemPrompt")
         object["threads"] = threads
         object.removeValue(forKey: "defaultModel")
         object.removeValue(forKey: "defaultReasoningEffort")
+        object.removeValue(forKey: "defaultSystemPrompt")
         let legacyData = try JSONSerialization.data(withJSONObject: object)
         try legacyData.write(to: fixture.paths.stateFile, options: .atomic)
 
@@ -165,8 +241,10 @@ final class ThreadStoreTests: XCTestCase {
         let selected = try XCTUnwrap(reloaded.state.threads.first)
         XCTAssertEqual(selected.model, HarnessThread.defaultModel)
         XCTAssertEqual(selected.reasoningEffort, HarnessThread.defaultReasoningEffort)
+        XCTAssertEqual(selected.systemPrompt, HarnessThread.defaultSystemPrompt)
         XCTAssertEqual(reloaded.state.defaultModel, HarnessThread.defaultModel)
         XCTAssertEqual(reloaded.state.defaultReasoningEffort, HarnessThread.defaultReasoningEffort)
+        XCTAssertEqual(reloaded.state.defaultSystemPrompt, HarnessThread.defaultSystemPrompt)
     }
 
     @MainActor
@@ -236,6 +314,49 @@ final class ThreadStoreTests: XCTestCase {
         XCTAssertEqual(turn["model"] as? String, "gpt-5.6-sol")
         XCTAssertEqual(turn["effort"] as? String, "max")
         XCTAssertEqual(turn["threadId"] as? String, "codex-thread")
+    }
+
+    @MainActor
+    func testSystemPromptIsForwardedToThreadStartOnly() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        var thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+        thread.systemPrompt = "Keep replies concise."
+
+        let start = HarnessController.threadStartParameters(for: thread)
+        XCTAssertEqual(start["developerInstructions"] as? String, thread.systemPrompt)
+
+        let resume = HarnessController.threadResumeParameters(
+            threadID: "codex-thread",
+            thread: thread
+        )
+        XCTAssertNil(resume["developerInstructions"])
+
+        let turn = HarnessController.turnStartParameters(
+            threadID: "codex-thread",
+            text: "hello",
+            thread: thread
+        )
+        XCTAssertNil(turn["developerInstructions"])
+    }
+
+    @MainActor
+    func testWhitespaceOnlySystemPromptIsOmittedFromStartAndResumeParameters() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        var thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+
+        for prompt in ["", " \n\t "] {
+            thread.systemPrompt = prompt
+            let start = HarnessController.threadStartParameters(for: thread)
+            XCTAssertNil(start["developerInstructions"])
+
+            let resume = HarnessController.threadResumeParameters(
+                threadID: "codex-thread",
+                thread: thread
+            )
+            XCTAssertNil(resume["developerInstructions"])
+        }
     }
 
     @MainActor

@@ -133,6 +133,9 @@ private struct TopStrip: View {
     @ObservedObject var controller: HarnessController
     let create: () -> Void
 
+    @State private var showingSystemPrompt = false
+    @State private var systemPromptDraft = ""
+
     var body: some View {
         HStack(spacing: 2) {
             Spacer(minLength: 0)
@@ -178,6 +181,10 @@ private struct TopStrip: View {
                 }
 
                 Divider()
+                Button("System prompt…") {
+                    systemPromptDraft = controller.store.state.defaultSystemPrompt
+                    showingSystemPrompt = true
+                }
                 // Status lives here, on demand, rather than as a permanent
                 // light on the main surface.
                 Text("Server: \(controller.serverState.settingsLabel)")
@@ -203,6 +210,14 @@ private struct TopStrip: View {
         // Top-aligned so the controls sit 4pt from the edge as drawn, rather
         // than floating in the middle of the strip.
         .frame(height: 34, alignment: .top)
+        .sheet(isPresented: $showingSystemPrompt) {
+            SystemPromptSheet(
+                draft: $systemPromptDraft,
+                save: { text in
+                    controller.updateSystemPrompt(text)
+                }
+            )
+        }
     }
 
     private var authenticationLabel: String {
@@ -217,6 +232,52 @@ private struct TopStrip: View {
         } else {
             Text(title)
         }
+    }
+}
+
+private struct SystemPromptSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    @Binding var draft: String
+    let save: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("System prompt for new threads")
+                .font(.system(size: 15, weight: .semibold))
+
+            TextEditor(text: $draft)
+                .font(.system(size: 11.5, design: .monospaced))
+                .scrollContentBackground(.hidden)
+                .padding(7)
+                .background(
+                    Color(nsColor: .textBackgroundColor),
+                    in: RoundedRectangle(cornerRadius: 8)
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.primary.opacity(0.1), lineWidth: 1)
+                }
+                .frame(height: 130)
+
+            Spacer(minLength: 0)
+
+            HStack(spacing: 8) {
+                Spacer()
+                Button("Cancel") { dismiss() }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut(.cancelAction)
+                Button("Save") {
+                    save(draft)
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(18)
+        .frame(width: 356, height: 240)
     }
 }
 

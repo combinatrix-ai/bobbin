@@ -57,6 +57,7 @@ public final class ThreadStore: ObservableObject {
             workingDirectory: workingDirectory,
             model: state.defaultModel,
             reasoningEffort: state.defaultReasoningEffort,
+            systemPrompt: state.defaultSystemPrompt,
             lastConversationAt: now
         )
         state.threads.append(thread)
@@ -68,6 +69,11 @@ public final class ThreadStore: ObservableObject {
     public func updateDefaults(model: String, reasoningEffort: String) throws {
         state.defaultModel = model
         state.defaultReasoningEffort = reasoningEffort
+        try persist()
+    }
+
+    public func updateSystemPrompt(_ text: String) throws {
+        state.defaultSystemPrompt = text
         try persist()
     }
 

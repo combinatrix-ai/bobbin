@@ -207,6 +207,15 @@ public final class HarnessController: ObservableObject {
         updateDefaults(model: model, reasoningEffort: effort)
     }
 
+    public func updateSystemPrompt(_ text: String) {
+        do {
+            try store.updateSystemPrompt(text)
+            objectWillChange.send()
+        } catch {
+            report(error)
+        }
+    }
+
     public func reasoningEfforts(for model: String) -> [String] {
         availableModels.first(where: { $0.id == model })?.supportedReasoningEfforts ?? []
     }
@@ -256,7 +265,7 @@ public final class HarnessController: ObservableObject {
     }
 
     static func threadStartParameters(for thread: HarnessThread) -> [String: Any] {
-        [
+        var parameters: [String: Any] = [
             "model": thread.model,
             "cwd": thread.workingDirectory,
             "approvalPolicy": thread.reviewMode.approvalPolicy,
@@ -264,6 +273,8 @@ public final class HarnessController: ObservableObject {
             "sandbox": thread.reviewMode.sandboxMode,
             "serviceName": "bobbin"
         ]
+        addSystemPromptParameter(to: &parameters, for: thread)
+        return parameters
     }
 
     /// Every turn after the first resumes the app-server thread, so resume is
@@ -280,6 +291,16 @@ public final class HarnessController: ObservableObject {
             "approvalsReviewer": thread.reviewMode.approvalsReviewer,
             "sandbox": thread.reviewMode.sandboxMode
         ]
+    }
+
+    private static func addSystemPromptParameter(
+        to parameters: inout [String: Any],
+        for thread: HarnessThread
+    ) {
+        guard !thread.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        parameters["developerInstructions"] = thread.systemPrompt
     }
 
     static func turnStartParameters(

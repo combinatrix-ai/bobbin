@@ -118,6 +118,16 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     public static let defaultModel = "gpt-5.6-luna"
     public static let defaultReasoningEffort = "xhigh"
     public static let defaultReviewMode = HarnessReviewMode.autoReview
+    public static let defaultSystemPrompt = """
+    You are answering inside Bobbin, a macOS menu bar popover roughly 390 points wide.
+
+    - Lead with the answer. Add context afterwards, and only when it changes what to do.
+    - Keep replies short enough to read without scrolling — usually a few sentences.
+    - Avoid wide tables and long code blocks; they wrap badly at this width. Show only the lines that changed.
+    - Reply in the language the user writes in.
+
+    Brevity applies to the reply, not to the work. Take as long as you need on tools, files and reasoning.
+    """
 
     /// Working directory for a new thread when the caller does not supply one.
     /// Deliberately computed from the current user's home each time rather than
@@ -134,6 +144,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     public var model: String
     public var reasoningEffort: String
     public var reviewMode: HarnessReviewMode
+    public var systemPrompt: String
     public var lastConversationAt: Date
     public var savedAt: Date?
     public var status: HarnessThreadStatus
@@ -148,6 +159,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         model: String = Self.defaultModel,
         reasoningEffort: String = Self.defaultReasoningEffort,
         reviewMode: HarnessReviewMode = Self.defaultReviewMode,
+        systemPrompt: String = Self.defaultSystemPrompt,
         lastConversationAt: Date = Date(),
         savedAt: Date? = nil,
         status: HarnessThreadStatus = .idle,
@@ -161,6 +173,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         self.model = model
         self.reasoningEffort = reasoningEffort
         self.reviewMode = reviewMode
+        self.systemPrompt = systemPrompt
         self.lastConversationAt = lastConversationAt
         self.savedAt = savedAt
         self.status = status
@@ -178,6 +191,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         case model
         case reasoningEffort
         case reviewMode
+        case systemPrompt
         case lastConversationAt
         case savedAt
         case status
@@ -198,6 +212,8 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         // value this build no longer recognises: neither may fail the load.
         reviewMode = (try? container.decodeIfPresent(HarnessReviewMode.self, forKey: .reviewMode))
             ?? Self.defaultReviewMode
+        systemPrompt = try container.decodeIfPresent(String.self, forKey: .systemPrompt)
+            ?? Self.defaultSystemPrompt
         lastConversationAt = try container.decode(Date.self, forKey: .lastConversationAt)
         savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt)
         status = try container.decode(HarnessThreadStatus.self, forKey: .status)
@@ -210,17 +226,20 @@ public struct PersistedState: Codable, Equatable, Sendable {
     public var selectedThreadID: UUID?
     public var defaultModel: String
     public var defaultReasoningEffort: String
+    public var defaultSystemPrompt: String
 
     public init(
         threads: [HarnessThread] = [],
         selectedThreadID: UUID? = nil,
         defaultModel: String = HarnessThread.defaultModel,
-        defaultReasoningEffort: String = HarnessThread.defaultReasoningEffort
+        defaultReasoningEffort: String = HarnessThread.defaultReasoningEffort,
+        defaultSystemPrompt: String = HarnessThread.defaultSystemPrompt
     ) {
         self.threads = threads
         self.selectedThreadID = selectedThreadID
         self.defaultModel = defaultModel
         self.defaultReasoningEffort = defaultReasoningEffort
+        self.defaultSystemPrompt = defaultSystemPrompt
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -228,6 +247,7 @@ public struct PersistedState: Codable, Equatable, Sendable {
         case selectedThreadID
         case defaultModel
         case defaultReasoningEffort
+        case defaultSystemPrompt
     }
 
     public init(from decoder: Decoder) throws {
@@ -242,6 +262,10 @@ public struct PersistedState: Codable, Equatable, Sendable {
             String.self,
             forKey: .defaultReasoningEffort
         ) ?? HarnessThread.defaultReasoningEffort
+        defaultSystemPrompt = try container.decodeIfPresent(
+            String.self,
+            forKey: .defaultSystemPrompt
+        ) ?? HarnessThread.defaultSystemPrompt
     }
 }
 
