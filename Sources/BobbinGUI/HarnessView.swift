@@ -17,12 +17,25 @@ struct HarnessView: View {
 
     @State private var showingConversation = false
     @State private var conversationID: UUID?
+    @State private var showingSystemPrompt = false
 
     var body: some View {
         VStack(spacing: 0) {
-            TopStrip(controller: controller, create: createThread)
+            TopStrip(
+                controller: controller,
+                create: createThread,
+                openSystemPrompt: openSystemPrompt
+            )
 
-            if showingConversation, let conversationID {
+            if showingSystemPrompt {
+                // A drill-down rather than a sheet. The menu-bar popover closes
+                // the moment it stops being the key window, so any modal
+                // presented from it takes its own parent down with it.
+                SystemPromptView(
+                    controller: controller,
+                    back: { showingSystemPrompt = false }
+                )
+            } else if showingConversation, let conversationID {
                 ConversationView(
                     controller: controller,
                     store: store,
@@ -45,6 +58,13 @@ struct HarnessView: View {
             // conversation and for app-server resume.
             showingConversation = false
             conversationID = nil
+            showingSystemPrompt = false
+        }
+    }
+
+    private func openSystemPrompt() {
+        withAnimation(.easeOut(duration: 0.16)) {
+            showingSystemPrompt = true
         }
     }
 
@@ -132,9 +152,7 @@ private struct ThreadListView: View {
 private struct TopStrip: View {
     @ObservedObject var controller: HarnessController
     let create: () -> Void
-
-    @State private var showingSystemPrompt = false
-    @State private var systemPromptDraft = ""
+    let openSystemPrompt: () -> Void
 
     var body: some View {
         HStack(spacing: 2) {
@@ -181,10 +199,7 @@ private struct TopStrip: View {
                 }
 
                 Divider()
-                Button("System prompt…") {
-                    systemPromptDraft = controller.store.state.defaultSystemPrompt
-                    showingSystemPrompt = true
-                }
+                Button("System prompt…", action: openSystemPrompt)
                 // Status lives here, on demand, rather than as a permanent
                 // light on the main surface.
                 Text("Server: \(controller.serverState.settingsLabel)")
@@ -212,14 +227,6 @@ private struct TopStrip: View {
         // Top-aligned so the controls sit 4pt from the edge as drawn, rather
         // than floating in the middle of the strip.
         .frame(height: 34, alignment: .top)
-        .sheet(isPresented: $showingSystemPrompt) {
-            SystemPromptSheet(
-                draft: $systemPromptDraft,
-                save: { text in
-                    controller.updateSystemPrompt(text)
-                }
-            )
-        }
     }
 
     private var authenticationLabel: String {
@@ -237,20 +244,61 @@ private struct TopStrip: View {
     }
 }
 
-private struct SystemPromptSheet: View {
-    @Environment(\.dismiss) private var dismiss
+/// The system prompt editor, drilled into from the settings menu.
+///
+/// It is a page inside the popover rather than a sheet, for the same reason the
+/// conversation is: a sheet needs a host window that stays key, and the
+/// menu-bar popover dismisses itself as soon as it is not. Back discards,
+/// Save commits and returns — there is no separate Cancel, because leaving the
+/// page is the cancel.
+private struct SystemPromptView: View {
+    @ObservedObject var controller: HarnessController
+    let back: () -> Void
 
-    @Binding var draft: String
-    let save: (String) -> Void
+    @State private var draft = ""
+    @FocusState private var editorFocused: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("System prompt for new threads")
-                .font(.system(size: 15, weight: .semibold))
+        VStack(spacing: 0) {
+            HStack(spacing: 5) {
+                Button(action: back) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("Back")
+                .accessibilityLabel("Back")
+
+                Text("System prompt")
+                    .font(.system(size: 12.5, weight: .semibold))
+
+                Spacer(minLength: 3)
+
+                Button("Save") {
+                    controller.updateSystemPrompt(draft)
+                    back()
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(isDirty ? Color.harnessAccent : Color.secondary)
+                .disabled(!isDirty)
+                .help("Save")
+            }
+            .padding(.horizontal, 7)
+            .frame(height: 38)
+
+            Text("Applied to new threads")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 13)
+                .frame(height: 24)
 
             TextEditor(text: $draft)
                 .font(.system(size: 11.5, design: .monospaced))
                 .scrollContentBackground(.hidden)
+                .focused($editorFocused)
                 .padding(7)
                 .background(
                     Color(nsColor: .textBackgroundColor),
@@ -260,27 +308,17 @@ private struct SystemPromptSheet: View {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(Color.primary.opacity(0.1), lineWidth: 1)
                 }
-                .frame(height: 130)
-
-            Spacer(minLength: 0)
-
-            HStack(spacing: 8) {
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut(.cancelAction)
-                Button("Save") {
-                    save(draft)
-                    dismiss()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                .keyboardShortcut(.defaultAction)
-            }
+                .padding(.horizontal, 11)
+                .padding(.bottom, 11)
         }
-        .padding(18)
-        .frame(width: 356, height: 240)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            draft = controller.store.state.defaultSystemPrompt
+            editorFocused = true
+        }
     }
+
+    private var isDirty: Bool { draft != controller.store.state.defaultSystemPrompt }
 }
 
 /// Renders nothing at all while the app-server is healthy.
