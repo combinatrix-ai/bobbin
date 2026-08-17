@@ -22,6 +22,18 @@ A minimal macOS menu bar client for Codex app-server. It keeps its conversations
 - Permanently deletes unsaved app-server threads after seven days.
 - Moves starred or saved threads to the bottom Saved section and exempts them from cleanup.
 
+## Demo mode
+
+Demo mode is for product screenshots and other safe UI walkthroughs. Launch with
+`--demo-mode` or `BOBBIN_DEMO_MODE=1`; it uses only a throwaway directory under
+the system temporary directory, removes it on termination, and never reads real
+credentials, starts `codex app-server`, or touches the normal Bobbin state.
+
+To show specific content, pass `--demo-data /path/to/state.json` or set
+`BOBBIN_DEMO_DATA`. This also enables demo mode. The file uses the same format
+as Bobbin's own `state.json`, so a copied state file can be edited and reused
+without maintaining a second schema.
+
 ## Storage
 
 Runtime data is stored under `~/Library/Application Support/Bobbin/`. Nothing there holds an API key, but two independent sets of conversation data accumulate — the app's own `state.json`, and Codex's isolated home under `CodexHome/`:

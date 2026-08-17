@@ -38,7 +38,14 @@ struct RootView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(.regularMaterial)
-        .task { controller.boot() }
+        .task {
+            // Demo controllers are already ready and authenticated. Keeping
+            // this branch at the view boundary makes the production boot
+            // sequence unreachable for a demo session.
+            if !controller.isDemoMode {
+                controller.boot()
+            }
+        }
     }
 
     @ViewBuilder
@@ -58,7 +65,15 @@ struct RootView: View {
         case .deviceCode(let verificationURL, let userCode, _):
             DeviceAuthView(verificationURL: verificationURL, userCode: userCode)
         case .failed(let message):
-            AuthErrorView(message: message, retryDeviceAuth: controller.chooseDeviceAuth)
+            if controller.isDemoMode {
+                AuthErrorView(
+                    title: "Could not load demo data",
+                    message: message,
+                    retryDeviceAuth: nil
+                )
+            } else {
+                AuthErrorView(message: message, retryDeviceAuth: controller.chooseDeviceAuth)
+            }
         }
     }
 }

@@ -67,6 +67,9 @@ public final class HarnessController: ObservableObject {
     @Published public private(set) var lastError: String?
 
     public let store: ThreadStore
+    /// Demo controllers are fully populated before the view appears and never
+    /// own an app-server client.
+    public let isDemoMode: Bool
 
     private let keyProvider: APIKeyProvider
     private var client: CodexAppServerClient?
@@ -77,11 +80,41 @@ public final class HarnessController: ObservableObject {
 
     public init(paths: HarnessPaths? = nil, keyProvider: APIKeyProvider = APIKeyProvider()) throws {
         let paths = try paths ?? HarnessPaths()
+        self.isDemoMode = false
         self.store = try ThreadStore(paths: paths)
         self.keyProvider = keyProvider
 
         if store.state.threads.isEmpty {
             _ = try store.createThread(workingDirectory: Self.resolvedWorkingDirectory(nil))
+        }
+    }
+
+    /// Constructs a populated, authenticated controller without entering the
+    /// production boot sequence. The caller installs the fixture first so the
+    /// store remains the owner of demo state and future edits.
+    public init(
+        demoPaths paths: HarnessPaths,
+        fixture: DemoFixture?,
+        error: String? = nil
+    ) throws {
+        self.isDemoMode = true
+        self.store = try ThreadStore(paths: paths, normalizeInterruptedRuns: false)
+        self.keyProvider = APIKeyProvider()
+
+        if let fixture, error == nil {
+            self.serverState = .ready
+            self.authState = .authenticated(.deviceAuth)
+            self.modelVerified = true
+            self.availableModels = fixture.modelOptions
+            self.toolOutputs = fixture.toolOutputs
+        } else {
+            let message = error ?? "Could not load demo data."
+            self.serverState = .ready
+            self.authState = .failed(message)
+            self.modelVerified = false
+            self.availableModels = DemoFixture.modelCatalogue
+            self.lastError = message
+            self.toolOutputs = [:]
         }
     }
 
@@ -94,12 +127,14 @@ public final class HarnessController: ObservableObject {
     }
 
     public func boot() {
+        guard !isDemoMode else { return }
         guard client == nil else { return }
         bootTask?.cancel()
         bootTask = Task { await bootSequence() }
     }
 
     public func restart() {
+        guard !isDemoMode else { return }
         client?.stop()
         client = nil
         serverState = .restarting

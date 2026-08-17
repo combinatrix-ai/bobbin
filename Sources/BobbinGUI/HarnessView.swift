@@ -188,7 +188,9 @@ private struct TopStrip: View {
                 // Status lives here, on demand, rather than as a permanent
                 // light on the main surface.
                 Text("Server: \(controller.serverState.settingsLabel)")
-                Button("Restart app-server", action: controller.restart)
+                if !controller.isDemoMode {
+                    Button("Restart app-server", action: controller.restart)
+                }
                 Text("Auth: \(authenticationLabel)")
                 Divider()
                 Button("Quit Bobbin") {

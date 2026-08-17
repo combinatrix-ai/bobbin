@@ -13,15 +13,13 @@ public final class ThreadStore: ObservableObject {
 
     public init(
         paths: HarnessPaths,
-        retentionInterval: TimeInterval = 7 * 24 * 60 * 60
+        retentionInterval: TimeInterval = 7 * 24 * 60 * 60,
+        normalizeInterruptedRuns: Bool = true
     ) throws {
         self.paths = paths
         self.retentionInterval = retentionInterval
-        self.encoder = JSONEncoder()
-        self.decoder = JSONDecoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        decoder.dateDecodingStrategy = .iso8601
+        self.encoder = PersistedStateCoding.encoder()
+        self.decoder = PersistedStateCoding.decoder()
 
         try paths.prepare()
         if FileManager.default.fileExists(atPath: paths.stateFile.path) {
@@ -31,7 +29,9 @@ public final class ThreadStore: ObservableObject {
             self.state = PersistedState()
         }
 
-        normalizeInterruptedRuns()
+        if normalizeInterruptedRuns {
+            self.normalizeInterruptedRuns()
+        }
     }
 
     public var activeThreads: [HarnessThread] {

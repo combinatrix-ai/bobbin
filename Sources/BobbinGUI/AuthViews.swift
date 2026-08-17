@@ -124,15 +124,26 @@ private struct ConnectMark: View {
 }
 
 struct AuthErrorView: View {
+    let title: String
     let message: String
-    let retryDeviceAuth: () -> Void
+    let retryDeviceAuth: (() -> Void)?
+
+    init(
+        title: String = "Could not sign in",
+        message: String,
+        retryDeviceAuth: (() -> Void)?
+    ) {
+        self.title = title
+        self.message = message
+        self.retryDeviceAuth = retryDeviceAuth
+    }
 
     var body: some View {
         VStack(spacing: 11) {
             Image(systemName: "exclamationmark.circle")
                 .font(.system(size: 24))
                 .foregroundStyle(.red)
-            Text("Could not sign in")
+            Text(title)
                 .font(.system(size: 14, weight: .semibold))
             Text(message)
                 .font(.system(size: 10.5))
@@ -140,9 +151,11 @@ struct AuthErrorView: View {
                 .multilineTextAlignment(.center)
                 .lineLimit(3)
                 .frame(maxWidth: 300)
-            Button("Retry device auth", action: retryDeviceAuth)
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
+            if let retryDeviceAuth {
+                Button("Retry device auth", action: retryDeviceAuth)
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+            }
         }
         .padding(28)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

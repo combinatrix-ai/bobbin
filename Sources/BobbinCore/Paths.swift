@@ -24,6 +24,33 @@ public struct HarnessPaths: Sendable {
         self.codexHome = resolvedRoot.appendingPathComponent("CodexHome", isDirectory: true)
     }
 
+    /// Prefix for demo roots. Deletion is gated on it, so cleanup can never
+    /// widen to a directory Bobbin did not create.
+    public static let demoRootPrefix = "Bobbin-Demo-"
+
+    /// A throwaway root under the system temporary directory.
+    ///
+    /// Demo mode reads and writes only here, so a demo run cannot observe or
+    /// disturb the real `~/Library/Application Support/Bobbin`.
+    public static func demo() throws -> HarnessPaths {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(demoRootPrefix + UUID().uuidString, isDirectory: true)
+        return try HarnessPaths(root: root)
+    }
+
+    /// True only for a root this process could have created for a demo run.
+    public var isDemoRoot: Bool {
+        let temporary = FileManager.default.temporaryDirectory.standardizedFileURL.path
+        return root.lastPathComponent.hasPrefix(Self.demoRootPrefix)
+            && root.standardizedFileURL.path.hasPrefix(temporary)
+    }
+
+    /// Removes a demo root, and refuses to remove anything else.
+    public func removeDemoRoot() {
+        guard isDemoRoot else { return }
+        try? FileManager.default.removeItem(at: root)
+    }
+
     public func prepare() throws {
         try createPrivateDirectory(root)
         try createPrivateDirectory(codexHome)
