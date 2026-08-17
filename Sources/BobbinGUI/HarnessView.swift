@@ -2,6 +2,20 @@ import AppKit
 import SwiftUI
 import BobbinCore
 
+private func presentFolderChooser(
+    startingAt path: String,
+    onChoose: (String) -> Void
+) {
+    let panel = NSOpenPanel()
+    panel.title = "Working folder"
+    panel.canChooseFiles = false
+    panel.canChooseDirectories = true
+    panel.allowsMultipleSelection = false
+    panel.directoryURL = URL(fileURLWithPath: path)
+    guard panel.runModal() == .OK, let url = panel.url else { return }
+    onChoose(url.path)
+}
+
 /// The authenticated part of the menu-bar popover.
 ///
 /// The list is intentionally the landing view. A thread is opened as a
@@ -9,8 +23,8 @@ import BobbinCore
 /// panes visible at once.
 ///
 /// The popover does not introduce itself: there is no wordmark, badge or
-/// standing health light. The only fixed chrome is a quiet strip of actions
-/// pinned top-right, shared by both views.
+/// standing health light. The thread list starts with the action the user is
+/// most likely to take, while the conversation owns its own header.
 struct HarnessView: View {
     @ObservedObject var controller: HarnessController
     @ObservedObject var store: ThreadStore
@@ -21,12 +35,6 @@ struct HarnessView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            TopStrip(
-                controller: controller,
-                create: createThread,
-                openSystemPrompt: openSystemPrompt
-            )
-
             if showingSystemPrompt {
                 // A drill-down rather than a sheet. The menu-bar popover closes
                 // the moment it stops being the key window, so any modal
@@ -47,7 +55,7 @@ struct HarnessView: View {
                     controller: controller,
                     store: store,
                     open: openConversation,
-                    create: createThread
+                    openSystemPrompt: openSystemPrompt
                 )
             }
         }
@@ -76,19 +84,6 @@ struct HarnessView: View {
         }
     }
 
-    private func createThread() {
-        controller.createThread()
-        // createThread selects the new item in the store. Defer one run-loop
-        // so the published state has reached SwiftUI before reading it.
-        DispatchQueue.main.async {
-            guard let id = store.selectedThread?.id else { return }
-            conversationID = id
-            withAnimation(.easeOut(duration: 0.16)) {
-                showingConversation = true
-            }
-        }
-    }
-
     private func closeConversation() {
         withAnimation(.easeOut(duration: 0.16)) {
             showingConversation = false
@@ -100,12 +95,18 @@ private struct ThreadListView: View {
     @ObservedObject var controller: HarnessController
     @ObservedObject var store: ThreadStore
     let open: (UUID) -> Void
-    let create: () -> Void
+    let openSystemPrompt: () -> Void
 
     @State private var showingServerDetail = false
+    @State private var draft = ""
+    @State private var workingDirectory = HarnessThread.defaultWorkingDirectory
+    @FocusState private var editorFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
+            newThreadField
+            threadHeader
+
             ServerBanner(
                 notice: controller.serverState.notice,
                 showingDetail: $showingServerDetail,
@@ -115,7 +116,7 @@ private struct ThreadListView: View {
             ScrollView {
                 LazyVStack(spacing: 1) {
                     if store.activeThreads.isEmpty, store.savedThreads.isEmpty {
-                        EmptyThreadView(create: create)
+                        EmptyThreadView()
                     } else {
                         ForEach(store.activeThreads) { thread in
                             ThreadRow(
@@ -141,33 +142,113 @@ private struct ThreadListView: View {
             }
             .scrollIndicators(.automatic)
         }
+        .onAppear {
+            // A list visit always starts from the current home directory. The
+            // chosen folder is view-local and is never persisted as a default.
+            workingDirectory = HarnessThread.defaultWorkingDirectory
+            editorFocused = true
+        }
+    }
+
+    private var newThreadField: some View {
+        HStack(alignment: .bottom, spacing: 8) {
+            TextField("New thread…", text: $draft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .lineLimit(1...3)
+                .focused($editorFocused)
+                .onKeyPress(.return, phases: .down) { keyPress in
+                    guard !keyPress.modifiers.contains(.shift) else {
+                        return .ignored
+                    }
+                    submit()
+                    return .handled
+                }
+
+            HStack(spacing: 6) {
+                Button(action: chooseFolder) {
+                    Label(folderName, systemImage: "folder")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                .buttonStyle(.plain)
+                .help(workingDirectory)
+                .accessibilityLabel("Working folder: \(workingDirectory)")
+
+                Text("↵")
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+        }
+        .padding(.horizontal, 11)
+        .padding(.vertical, 8)
+        .background(
+            Color(nsColor: .textBackgroundColor),
+            in: RoundedRectangle(cornerRadius: 13)
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 13)
+                .stroke(Color.primary.opacity(0.09), lineWidth: 1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 8)
+        .padding(.bottom, 6)
+    }
+
+    private var threadHeader: some View {
+        HStack(spacing: 5) {
+            Text("THREADS")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.2)
+                .foregroundStyle(.secondary)
+
+            Spacer(minLength: 3)
+
+            SettingsMenu(
+                controller: controller,
+                openSystemPrompt: openSystemPrompt
+            )
+        }
+        .padding(.horizontal, 13)
+        .frame(height: 24)
+    }
+
+    private var folderName: String {
+        URL(fileURLWithPath: workingDirectory).lastPathComponent
+    }
+
+    private func submit() {
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+
+        let text = draft
+        draft = ""
+        guard let id = controller.createThreadAndSend(
+            text: text,
+            workingDirectory: workingDirectory
+        ) else {
+            return
+        }
+        open(id)
+    }
+
+    private func chooseFolder() {
+        presentFolderChooser(startingAt: workingDirectory) { path in
+            workingDirectory = path
+            editorFocused = true
+        }
     }
 }
 
-/// The only fixed chrome: two icon-only actions pinned to the top-right.
-///
-/// No wordmark, no badge, no logo and no standing status light — the user just
-/// clicked the mark in the menu bar, so the popover does not repeat itself, and
-/// a healthy server says nothing at all.
-private struct TopStrip: View {
+private struct SettingsMenu: View {
     @ObservedObject var controller: HarnessController
-    let create: () -> Void
     let openSystemPrompt: () -> Void
 
     var body: some View {
         HStack(spacing: 2) {
-            Spacer(minLength: 0)
-
-            Button(action: create) {
-                Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .semibold))
-                    .frame(width: 27, height: 27)
-            }
-            .buttonStyle(.plain)
-            .contentShape(Rectangle())
-            .help("New thread")
-            .accessibilityLabel("New thread")
-
             Menu {
                 Section("Default model") {
                     ForEach(controller.availableModels) { option in
@@ -214,7 +295,7 @@ private struct TopStrip: View {
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 11, weight: .medium))
-                    .frame(width: 27, height: 27)
+                    .frame(width: 24, height: 24)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -222,11 +303,6 @@ private struct TopStrip: View {
             .help("Settings")
             .accessibilityLabel("Settings")
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 4)
-        // Top-aligned so the controls sit 4pt from the edge as drawn, rather
-        // than floating in the middle of the strip.
-        .frame(height: 34, alignment: .top)
     }
 
     private var authenticationLabel: String {
@@ -396,20 +472,11 @@ private struct ServerBanner: View {
 }
 
 private struct EmptyThreadView: View {
-    let create: () -> Void
-
     var body: some View {
-        Button(action: create) {
-            Image(systemName: "plus")
-                .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help("New thread")
-        .accessibilityLabel("New thread")
-        .frame(maxWidth: .infinity, minHeight: 150)
+        Text("Type above to start a thread.")
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, minHeight: 150)
     }
 }
 
@@ -684,14 +751,9 @@ private struct ConversationView: View {
     }
 
     private func chooseFolder(for thread: HarnessThread) {
-        let panel = NSOpenPanel()
-        panel.title = "Working folder"
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.directoryURL = URL(fileURLWithPath: thread.workingDirectory)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        controller.updateWorkingDirectory(url.path, for: thread.id)
+        presentFolderChooser(startingAt: thread.workingDirectory) { path in
+            controller.updateWorkingDirectory(path, for: thread.id)
+        }
     }
 }
 

@@ -1,6 +1,24 @@
 import Foundation
 import Combine
 
+protocol HarnessAppServerClient: AnyObject {
+    var onNotification: CodexAppServerClient.NotificationHandler? { get set }
+    var onTermination: CodexAppServerClient.TerminationHandler? { get set }
+
+    func start() async throws
+    func stop()
+    func request(
+        method: String,
+        params: CodexAppServerClient.JSONObject?
+    ) async throws -> CodexAppServerClient.JSONObject
+    func sendNotification(
+        method: String,
+        params: CodexAppServerClient.JSONObject?
+    ) throws
+}
+
+extension CodexAppServerClient: HarnessAppServerClient {}
+
 @MainActor
 public final class HarnessController: ObservableObject {
     public static let defaultModel = HarnessThread.defaultModel
@@ -72,7 +90,7 @@ public final class HarnessController: ObservableObject {
     public let isDemoMode: Bool
 
     private let keyProvider: APIKeyProvider
-    private var client: CodexAppServerClient?
+    private var client: (any HarnessAppServerClient)?
     private var pendingAuthMode: AuthenticationMode?
     private var streamingMessages: [String: UUID] = [:]
     private var toolOutputs: [String: String] = [:]
@@ -115,6 +133,26 @@ public final class HarnessController: ObservableObject {
             self.availableModels = DemoFixture.modelCatalogue
             self.lastError = message
             self.toolOutputs = [:]
+        }
+    }
+
+    /// Test-only construction for exercising the live turn path without
+    /// launching a real app-server process.
+    init(
+        testPaths paths: HarnessPaths,
+        appServerClient: any HarnessAppServerClient
+    ) throws {
+        self.isDemoMode = false
+        self.store = try ThreadStore(paths: paths)
+        self.keyProvider = APIKeyProvider()
+        self.client = appServerClient
+        self.serverState = .ready
+        self.authState = .authenticated(.deviceAuth)
+        self.modelVerified = true
+        self.availableModels = DemoFixture.modelCatalogue
+
+        if store.state.threads.isEmpty {
+            _ = try store.createThread(workingDirectory: Self.resolvedWorkingDirectory(nil))
         }
     }
 
@@ -184,6 +222,30 @@ public final class HarnessController: ObservableObject {
             objectWillChange.send()
         } catch {
             report(error)
+        }
+    }
+
+    /// Creates the local thread before handing its first turn to the existing
+    /// send path. The returned ID lets the caller open the conversation while
+    /// the turn is already being started.
+    @discardableResult
+    public func createThreadAndSend(
+        text: String,
+        workingDirectory: String? = nil
+    ) -> UUID? {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        let cwd = Self.resolvedWorkingDirectory(workingDirectory)
+        do {
+            let thread = try store.createThread(workingDirectory: cwd)
+            objectWillChange.send()
+            send(text, in: thread.id)
+            return thread.id
+        } catch {
+            report(error)
+            return nil
         }
     }
 
