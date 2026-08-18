@@ -301,11 +301,11 @@ public final class HarnessController: ObservableObject {
     }
 
     public func updateDefaultModel(_ model: String) {
-        guard let option = availableModels.first(where: { $0.id == model }) else { return }
-        let currentEffort = store.state.defaultReasoningEffort
-        let effort = option.supportedReasoningEfforts.contains(currentEffort)
-            ? currentEffort
-            : preferredEffort(in: option.supportedReasoningEfforts)
+        guard availableModels.contains(where: { $0.id == model }) else { return }
+        let effort = resolvedReasoningEffort(
+            for: model,
+            keeping: store.state.defaultReasoningEffort
+        )
         updateDefaults(model: model, reasoningEffort: effort)
     }
 
@@ -326,6 +326,14 @@ public final class HarnessController: ObservableObject {
 
     public func reasoningEfforts(for model: String) -> [String] {
         availableModels.first(where: { $0.id == model })?.supportedReasoningEfforts ?? []
+    }
+
+    /// Keeps a valid current effort when changing models, otherwise applies
+    /// Bobbin's one fallback policy for both defaults and existing threads.
+    public func resolvedReasoningEffort(for model: String, keeping current: String) -> String {
+        let efforts = reasoningEfforts(for: model)
+        if efforts.contains(current) { return current }
+        return preferredEffort(in: efforts)
     }
 
     public func saveThread(_ id: UUID) {

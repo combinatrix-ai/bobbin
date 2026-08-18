@@ -952,9 +952,10 @@ private struct ThreadOptionsRow: View {
             Menu {
                 ForEach(controller.availableModels) { option in
                     Button {
-                        let effort = option.supportedReasoningEfforts.contains(thread.reasoningEffort)
-                            ? thread.reasoningEffort
-                            : option.supportedReasoningEfforts.first ?? HarnessController.defaultEffort
+                        let effort = controller.resolvedReasoningEffort(
+                            for: option.id,
+                            keeping: thread.reasoningEffort
+                        )
                         selectModel(option.id, effort)
                     } label: {
                         choiceLabel(

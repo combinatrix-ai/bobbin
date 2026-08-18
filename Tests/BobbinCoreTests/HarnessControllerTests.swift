@@ -113,6 +113,29 @@ final class HarnessControllerTests: XCTestCase {
         XCTAssertTrue(client.requests.isEmpty)
     }
 
+    func testModelChangesShareOneReasoningFallbackPolicy() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let controller = try HarnessController(
+            testPaths: fixture.paths,
+            appServerClient: RecordingAppServerClient()
+        )
+
+        XCTAssertEqual(
+            controller.resolvedReasoningEffort(for: "gpt-5.6-luna", keeping: "high"),
+            "high"
+        )
+        XCTAssertEqual(
+            controller.resolvedReasoningEffort(for: "gpt-5.6-luna", keeping: "max"),
+            HarnessController.defaultEffort
+        )
+
+        try controller.store.updateDefaults(model: "gpt-5.6-terra", reasoningEffort: "max")
+        controller.updateDefaultModel("gpt-5.6-luna")
+        XCTAssertEqual(controller.store.state.defaultReasoningEffort, HarnessController.defaultEffort)
+    }
+
     func testEditReadsAndForksAtPriorTurnBeforeTruncatingSuffix() async throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
