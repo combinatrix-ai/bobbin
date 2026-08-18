@@ -1,0 +1,691 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bobbin: new-thread composer send-button variants</title>
+<style>
+  :root {
+    --page:      #f4f1e8;
+    --chrome:    #f5f5f2;
+    --field:     #ffffff;
+    --ink:       #252820;
+    --ink-soft:  #343832;
+    --muted:     #6f736d;
+    --muted-2:   #8b8e88;
+    --hairline:  rgba(37, 40, 32, 0.09);
+    --hairline-2:rgba(37, 40, 32, 0.16);
+    --accent:    #b4ce55;
+    --accent-ink:#3f433d;
+    --radius:    13px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    padding: 48px 28px 96px;
+    background: var(--page);
+    color: var(--ink);
+    font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+
+  .wrap { max-width: 1100px; margin: 0 auto; }
+
+  /* ---------- page header ---------- */
+
+  header { max-width: 62ch; margin-bottom: 44px; }
+
+  h1 {
+    margin: 0 0 10px;
+    font-size: 21px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  header p { margin: 0 0 6px; color: var(--muted); }
+
+  .facts {
+    margin: 18px 0 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .facts li::before { content: "· "; color: var(--muted-2); }
+
+  /* ---------- variant sections ---------- */
+
+  .variant {
+    padding-top: 30px;
+    margin-top: 30px;
+    border-top: 1px solid var(--hairline-2);
+  }
+
+  .v-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 12px;
+    margin-bottom: 20px;
+  }
+
+  .v-num {
+    font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--muted-2);
+    letter-spacing: 0.06em;
+    padding-top: 4px;
+  }
+
+  .v-head h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+
+  .tag {
+    font-size: 10.5px;
+    color: var(--muted);
+    border: 1px solid var(--hairline-2);
+    border-radius: 999px;
+    padding: 1px 8px;
+    white-space: nowrap;
+  }
+
+  .tradeoff {
+    flex: 1 1 320px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 12.5px;
+    min-width: 260px;
+  }
+
+  .states {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 392px));
+    gap: 18px 22px;
+    justify-content: start;
+  }
+
+  figure { margin: 0; }
+
+  figcaption {
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted-2);
+    margin-bottom: 7px;
+  }
+
+  /* ---------- popover frame (392pt wide) ---------- */
+
+  .pop {
+    width: 392px;
+    max-width: 100%;
+    background: var(--chrome);
+    border: 1px solid var(--hairline-2);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .pop-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 9px 12px 0;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--muted-2);
+  }
+  .pop-top .rule { flex: 1; height: 1px; background: var(--hairline); }
+
+  .rows { padding: 8px 12px 11px; }
+  .row {
+    font-size: 11.5px;
+    color: var(--muted);
+    padding: 5px 0;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .row .dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: var(--muted-2); flex: none;
+  }
+  .row.faded { opacity: 0.5; }
+
+  .composer-slot {
+    border-top: 1px solid var(--hairline);
+    padding: 8px 10px 10px;
+  }
+
+  /* ---------- shared composer atoms ---------- */
+
+  .field {
+    background: var(--field);
+    border: 1px solid var(--hairline);
+    border-radius: var(--radius);
+    min-width: 0;
+  }
+
+  .text {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--ink);
+    word-break: break-word;
+  }
+  .text.ph { color: var(--muted-2); }
+
+  .folder {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 10.5px;
+    color: var(--muted);
+    white-space: nowrap;
+    flex: none;
+    background: none;
+    border: 0;
+    padding: 0;
+    cursor: default;
+  }
+  .folder svg { width: 11px; height: 11px; flex: none; }
+
+  .send {
+    flex: none;
+    display: grid;
+    place-items: center;
+    border: 0;
+    padding: 0;
+    cursor: default;
+  }
+  .send svg { width: 11px; height: 11px; }
+
+  /* circle send, ink fill (matches the conversation composer's send control) */
+  .send.circle {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: var(--ink);
+    color: var(--chrome);
+  }
+  .send.circle[disabled] { opacity: 0.3; }
+
+  /* ---------- v1: detached circle (current new-thread layout) ---------- */
+
+  .v1 { display: flex; align-items: flex-end; gap: 8px; }
+  .v1 .field {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 8px 11px;
+  }
+  .v1 .text { flex: 1 1 auto; }
+
+  /* ---------- v2: inset circle ---------- */
+
+  .v2 .field {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 5px 5px 5px 11px;
+  }
+  .v2 .stack { flex: 1 1 auto; min-width: 0; padding: 4px 0 3px; }
+  .v2 .folder { margin-top: 6px; }
+
+  /* ---------- v3: footer rail ---------- */
+
+  .v3 .field { padding: 8px 11px 6px; }
+  .v3 .foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 7px;
+    padding-top: 6px;
+    border-top: 1px solid var(--hairline);
+  }
+  .v3 .foot .spacer { flex: 1 1 auto; }
+
+  .send.pill {
+    height: 22px;
+    padding: 0 10px;
+    border-radius: 999px;
+    background: var(--ink);
+    color: var(--chrome);
+  }
+  .send.pill svg { width: 10px; height: 10px; }
+  .send.pill[disabled] {
+    background: transparent;
+    color: var(--muted-2);
+    box-shadow: inset 0 0 0 1px var(--hairline-2);
+  }
+
+  /* ---------- v4: flush trailing cell ---------- */
+
+  .v4 .field {
+    display: flex;
+    align-items: stretch;
+    padding: 0;
+    overflow: hidden;
+  }
+  .v4 .body {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    padding: 8px 10px;
+  }
+  .v4 .body .text { flex: 1 1 auto; }
+
+  .send.cell {
+    width: 36px;
+    align-self: stretch;
+    background: transparent;
+    color: var(--ink);
+    border-left: 1px solid var(--hairline);
+  }
+  .send.cell svg { width: 12px; height: 12px; }
+  .send.cell[disabled] { color: var(--muted-2); opacity: 0.55; }
+  .send.cell.on { background: var(--ink); color: var(--chrome); border-left-color: transparent; }
+
+  /* ---------- v5: accent send with folder strip ---------- */
+
+  .v5 .line { display: flex; align-items: flex-end; gap: 8px; }
+  .v5 .field { flex: 1 1 auto; padding: 8px 11px; }
+  .v5 .strip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 7px 2px 0;
+  }
+  .send.accent {
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .send.accent[disabled] {
+    background: transparent;
+    color: var(--muted-2);
+    box-shadow: inset 0 0 0 1.5px var(--hairline-2);
+  }
+
+  /* ---------- recommendation ---------- */
+
+  .rec {
+    margin-top: 44px;
+    padding-top: 26px;
+    border-top: 2px solid var(--ink);
+    max-width: 66ch;
+  }
+  .rec h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
+  .rec p { margin: 0 0 10px; color: var(--ink-soft); }
+  .rec strong { font-weight: 600; }
+  .rec ul { margin: 0; padding-left: 18px; color: var(--muted); }
+  .rec li { margin-bottom: 4px; }
+
+  @media (max-width: 560px) {
+    body { padding: 32px 16px 64px; }
+    .states { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>New-thread composer: send-button variants</h1>
+  <p>Five options for the top composer in the 392&nbsp;pt Bobbin popover, each shown empty (send disabled) and typed (send enabled).</p>
+  <ul class="facts">
+    <li>Return submits; no return-key glyph is drawn</li>
+    <li>Working-folder control present in every variant</li>
+    <li>Empty draft disables send, visibly</li>
+    <li>Rendered 1&nbsp;px = 1&nbsp;pt</li>
+  </ul>
+</header>
+
+<!-- ============================= V1 ============================= -->
+<section class="variant">
+  <div class="v-head">
+    <span class="v-num">01</span>
+    <h2>Detached Circle</h2>
+    <span class="tag">current implementation</span>
+    <p class="tradeoff">Uses the same detached 30&nbsp;pt send control as the conversation composer, so nothing new to learn. Its button and gap cost 38&nbsp;pt of text width, and the circle drifts away from the folder chip as the field grows.</p>
+  </div>
+  <div class="states">
+    <figure>
+      <figcaption>Empty · send disabled</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="v1">
+            <div class="field">
+              <span class="text ph">New thread…</span>
+              <button class="folder" type="button" aria-label="Working folder: Documents">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+                Documents
+              </button>
+            </div>
+            <button class="send circle" type="button" disabled aria-label="Send">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.6M3.6 8 8 3.4 12.4 8"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="pop-top">THREADS<span class="rule"></span></div>
+        <div class="rows">
+          <div class="row"><span class="dot"></span>Rename the export helpers</div>
+          <div class="row faded"><span class="dot"></span>Check the launch-at-login path</div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption>Typed · send enabled</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="v1">
+            <div class="field">
+              <span class="text">Summarise what changed in the popover layout</span>
+              <button class="folder" type="button" aria-label="Working folder: Documents">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+                Documents
+              </button>
+            </div>
+            <button class="send circle" type="button" aria-label="Send">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.6M3.6 8 8 3.4 12.4 8"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="pop-top">THREADS<span class="rule"></span></div>
+        <div class="rows">
+          <div class="row"><span class="dot"></span>Rename the export helpers</div>
+          <div class="row faded"><span class="dot"></span>Check the launch-at-login path</div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================= V2 ============================= -->
+<section class="variant">
+  <div class="v-head">
+    <span class="v-num">02</span>
+    <h2>Inset Circle</h2>
+    <span class="tag">selected</span>
+    <p class="tradeoff">Keeps the familiar ink circle but tucks it inside the rounded field, so the control reads as one object and the field reclaims the full 372&nbsp;pt. The 5&nbsp;pt inset makes the text box feel slightly taller when empty.</p>
+  </div>
+  <div class="states">
+    <figure>
+      <figcaption>Empty · send disabled</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="v2">
+            <div class="field">
+              <div class="stack">
+                <div class="text ph">New thread…</div>
+                <button class="folder" type="button" aria-label="Working folder: Documents">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+                  Documents
+                </button>
+              </div>
+              <button class="send circle" type="button" disabled aria-label="Send">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.6M3.6 8 8 3.4 12.4 8"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="pop-top">THREADS<span class="rule"></span></div>
+        <div class="rows">
+          <div class="row"><span class="dot"></span>Rename the export helpers</div>
+          <div class="row faded"><span class="dot"></span>Check the launch-at-login path</div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption>Typed · send enabled</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="v2">
+            <div class="field">
+              <div class="stack">
+                <div class="text">Summarise what changed in the popover layout and list the files</div>
+                <button class="folder" type="button" aria-label="Working folder: Documents">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+                  Documents
+                </button>
+              </div>
+              <button class="send circle" type="button" aria-label="Send">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.6M3.6 8 8 3.4 12.4 8"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="pop-top">THREADS<span class="rule"></span></div>
+        <div class="rows">
+          <div class="row"><span class="dot"></span>Rename the export helpers</div>
+          <div class="row faded"><span class="dot"></span>Check the launch-at-login path</div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================= V3 ============================= -->
+<section class="variant">
+  <div class="v-head">
+    <span class="v-num">03</span>
+    <h2>Footer Rail</h2>
+    <span class="tag">room to grow</span>
+    <p class="tradeoff">A hairline footer inside the field gives the folder chip and a small send pill a stable home and leaves space for future per-thread controls. It adds about 22&nbsp;pt of permanent height to the top of the list.</p>
+  </div>
+  <div class="states">
+    <figure>
+      <figcaption>Empty · send disabled</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="v3">
+            <div class="field">
+              <div class="text ph">New thread…</div>
+              <div class="foot">
+                <button class="folder" type="button" aria-label="Working folder: Documents">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+                  Documents
+                </button>
+                <span class="spacer"></span>
+                <button class="send pill" type="button" disabled aria-label="Send">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.6M3.6 8 8 3.4 12.4 8"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pop-top">THREADS<span class="rule"></span></div>
+        <div class="rows">
+          <div class="row"><span class="dot"></span>Rename the export helpers</div>
+          <div class="row faded"><span class="dot"></span>Check the launch-at-login path</div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption>Typed · send enabled</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="v3">
+            <div class="field">
+              <div class="text">Summarise what changed in the popover layout</div>
+              <div class="foot">
+                <button class="folder" type="button" aria-label="Working folder: Documents">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+                  Documents
+                </button>
+                <span class="spacer"></span>
+                <button class="send pill" type="button" aria-label="Send">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.6M3.6 8 8 3.4 12.4 8"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="pop-top">THREADS<span class="rule"></span></div>
+        <div class="rows">
+          <div class="row"><span class="dot"></span>Rename the export helpers</div>
+          <div class="row faded"><span class="dot"></span>Check the launch-at-login path</div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================= V4 ============================= -->
+<section class="variant">
+  <div class="v-head">
+    <span class="v-num">04</span>
+    <h2>Flush Trailing Cell</h2>
+    <span class="tag">one control</span>
+    <p class="tradeoff">Send becomes a full-height segment of the field, divided by a hairline like a stepper, so it can never fall out of alignment as the text grows. Its disabled state is a dimmed glyph rather than a dimmed shape.</p>
+  </div>
+  <div class="states">
+    <figure>
+      <figcaption>Empty · send disabled</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="v4">
+            <div class="field">
+              <div class="body">
+                <span class="text ph">New thread…</span>
+                <button class="folder" type="button" aria-label="Working folder: Documents">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+                  Documents
+                </button>
+              </div>
+              <button class="send cell" type="button" disabled aria-label="Send">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.6M3.6 8 8 3.4 12.4 8"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="pop-top">THREADS<span class="rule"></span></div>
+        <div class="rows">
+          <div class="row"><span class="dot"></span>Rename the export helpers</div>
+          <div class="row faded"><span class="dot"></span>Check the launch-at-login path</div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption>Typed · send enabled</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="v4">
+            <div class="field">
+              <div class="body">
+                <span class="text">Summarise what changed in the popover layout</span>
+                <button class="folder" type="button" aria-label="Working folder: Documents">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+                  Documents
+                </button>
+              </div>
+              <button class="send cell on" type="button" aria-label="Send">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.6M3.6 8 8 3.4 12.4 8"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="pop-top">THREADS<span class="rule"></span></div>
+        <div class="rows">
+          <div class="row"><span class="dot"></span>Rename the export helpers</div>
+          <div class="row faded"><span class="dot"></span>Check the launch-at-login path</div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================= V5 ============================= -->
+<section class="variant">
+  <div class="v-head">
+    <span class="v-num">05</span>
+    <h2>Accent Send</h2>
+    <span class="tag">bolder</span>
+    <p class="tradeoff">The only coloured pixel in the popover is the send button, so readiness is legible at a glance and the disabled ring is unmistakably inert. It spends Bobbin's single accent on a control the keyboard usually triggers instead.</p>
+  </div>
+  <div class="states">
+    <figure>
+      <figcaption>Empty · send disabled</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="v5">
+            <div class="line">
+              <div class="field">
+                <span class="text ph">New thread…</span>
+              </div>
+              <button class="send accent" type="button" disabled aria-label="Send">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.6M3.6 8 8 3.4 12.4 8"/></svg>
+              </button>
+            </div>
+            <div class="strip">
+              <button class="folder" type="button" aria-label="Working folder: Documents">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+                Documents
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="pop-top">THREADS<span class="rule"></span></div>
+        <div class="rows">
+          <div class="row"><span class="dot"></span>Rename the export helpers</div>
+          <div class="row faded"><span class="dot"></span>Check the launch-at-login path</div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption>Typed · send enabled</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="v5">
+            <div class="line">
+              <div class="field">
+                <span class="text">Summarise what changed in the popover layout</span>
+              </div>
+              <button class="send accent" type="button" aria-label="Send">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V3.6M3.6 8 8 3.4 12.4 8"/></svg>
+              </button>
+            </div>
+            <div class="strip">
+              <button class="folder" type="button" aria-label="Working folder: Documents">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M2 4.2h4.2l1.3 1.6H14v6.4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z"/></svg>
+                Documents
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="pop-top">THREADS<span class="rule"></span></div>
+        <div class="rows">
+          <div class="row"><span class="dot"></span>Rename the export helpers</div>
+          <div class="row faded"><span class="dot"></span>Check the launch-at-login path</div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ========================= RECOMMENDATION ========================= -->
+<div class="rec">
+  <h2>Recommendation</h2>
+  <p><strong>02: Inset Circle.</strong> It keeps the ink circle and the 30&nbsp;pt hit target the conversation composer already ships, so the two composers stay one visual language. Moving it inside the field makes the new-thread control read as a single object and returns 38&nbsp;pt of width to the text.</p>
+  <ul>
+    <li>Take <strong>04</strong> if alignment as the field grows to three lines is the priority; it is the most structurally sound, just the quietest disabled state.</li>
+    <li>Take <strong>03</strong> only if a model or review-mode control is coming to this composer soon — otherwise the extra height is unearned.</li>
+    <li><strong>05</strong> is the bolder option and the clearest disabled state, but it makes send the loudest thing in a window whose point is quiet.</li>
+    <li>All five keep Return submitting from the keyboard with no return-key glyph drawn.</li>
+  </ul>
+</div>
+
+</div>
+</body>
+</html>

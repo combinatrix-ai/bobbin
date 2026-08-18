@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Bobbin puts quick, disposable Codex threads in your Mac menu bar.">
+  <title>Bobbin | Thread lightly</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .site-shell {
+      overflow: hidden;
+    }
+
+    .site-nav {
+      display: flex;
+      width: min(100% - 48px, 1180px);
+      height: 72px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 auto;
+    }
+
+    .site-brand {
+      display: inline-flex;
+      gap: 12px;
+      align-items: center;
+      color: var(--ink);
+      font-size: 16px;
+      font-weight: 760;
+      text-decoration: none;
+    }
+
+    .site-brand .brand-mark {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      padding: 7px;
+    }
+
+    .site-nav__links {
+      display: flex;
+      gap: 24px;
+      align-items: center;
+      font-size: 13px;
+      font-weight: 640;
+    }
+
+    .site-nav__links a {
+      color: var(--ink-soft);
+      text-decoration: none;
+    }
+
+    .site-nav__links a:hover {
+      color: var(--ink);
+    }
+
+    .site-nav__links .nav-cta {
+      padding: 8px 12px;
+      border-radius: 10px;
+      background: var(--ink);
+      color: var(--paper);
+    }
+
+    .site-main {
+      width: min(100% - 48px, 1180px);
+      margin: 0 auto;
+    }
+
+    .site-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 0.8fr) minmax(420px, 1.2fr);
+      gap: clamp(48px, 7vw, 96px);
+      align-items: center;
+      min-height: calc(100dvh - 72px);
+      padding: 54px 0 86px;
+    }
+
+    .hero-mark {
+      width: 54px;
+      height: 54px;
+      margin-bottom: 26px;
+      border-radius: 16px;
+      background: #1d2119;
+      padding: 10px;
+    }
+
+    .site-hero h1 {
+      max-width: 620px;
+      margin: 0;
+      font-size: clamp(54px, 6.6vw, 96px);
+      font-weight: 760;
+      letter-spacing: -0.065em;
+      line-height: 0.9;
+    }
+
+    .site-hero h1 span {
+      color: var(--accent);
+    }
+
+    .site-hero__lead {
+      max-width: 500px;
+      margin: 24px 0 30px;
+      color: var(--ink-soft);
+      font-size: 19px;
+      line-height: 1.5;
+    }
+
+    .site-hero .screenshot-slot {
+      min-height: 610px;
+      transform: rotate(1.2deg);
+    }
+
+    .site-hero .screenshot-slot::after {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      width: 13px;
+      height: 13px;
+      border-radius: 4px;
+      background: var(--accent);
+      content: "";
+    }
+
+    .section {
+      padding: 128px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .section-heading {
+      max-width: 700px;
+      margin: 0;
+      font-size: clamp(38px, 5vw, 68px);
+      font-weight: 730;
+      letter-spacing: -0.055em;
+      line-height: 1;
+    }
+
+    .section-lead {
+      max-width: 560px;
+      margin: 22px 0 0;
+      color: var(--ink-soft);
+      font-size: 18px;
+    }
+
+    .thread-life {
+      position: relative;
+      display: grid;
+      grid-template-columns: 0.8fr 1.2fr;
+      gap: 80px;
+      align-items: start;
+    }
+
+    .thread-life__story {
+      position: relative;
+      display: grid;
+      gap: 22px;
+      margin: 0;
+      padding-left: 46px;
+      list-style: none;
+    }
+
+    .thread-life__story::before {
+      position: absolute;
+      top: 24px;
+      bottom: 24px;
+      left: 13px;
+      width: 2px;
+      border-radius: 999px;
+      background: linear-gradient(var(--accent), color-mix(in srgb, var(--accent) 8%, transparent));
+      content: "";
+    }
+
+    .life-step {
+      position: relative;
+      min-height: 142px;
+      padding: 24px 26px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--paper-raised);
+    }
+
+    .life-step::before {
+      position: absolute;
+      top: 30px;
+      left: -40px;
+      width: 16px;
+      height: 16px;
+      border: 4px solid var(--paper);
+      border-radius: 5px;
+      background: var(--accent);
+      content: "";
+    }
+
+    .life-step h3 {
+      margin: 0 0 8px;
+      font-size: 21px;
+      letter-spacing: -0.025em;
+    }
+
+    .life-step p {
+      margin: 0;
+      color: var(--ink-soft);
+    }
+
+    .life-step.fade {
+      opacity: 0.68;
+    }
+
+    .life-step.keep {
+      border-color: color-mix(in srgb, var(--accent) 52%, var(--line));
+      background: var(--accent-soft);
+    }
+
+    .control-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 0.95fr) minmax(440px, 1.05fr);
+      gap: 80px;
+      align-items: center;
+    }
+
+    .control-demo {
+      display: block;
+      width: 100%;
+      height: auto;
+      border-radius: var(--radius);
+    }
+
+    .closing {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 48px;
+      align-items: end;
+      padding-bottom: 104px;
+    }
+
+    .closing::after {
+      position: absolute;
+      right: -92px;
+      bottom: -180px;
+      width: 440px;
+      height: 440px;
+      background: url("../Resources/Icon/BobbinMark.svg") center / contain no-repeat;
+      content: "";
+      opacity: 0.055;
+      pointer-events: none;
+    }
+
+    .closing h2 {
+      max-width: 700px;
+      margin: 0;
+      font-size: clamp(46px, 7vw, 92px);
+      letter-spacing: -0.065em;
+      line-height: 0.92;
+    }
+
+    .site-footer {
+      display: flex;
+      width: min(100% - 48px, 1180px);
+      min-height: 92px;
+      align-items: center;
+      justify-content: space-between;
+      margin: 0 auto;
+      border-top: 1px solid var(--line);
+      color: var(--ink-soft);
+      font-size: 13px;
+    }
+
+    @media (max-width: 900px) {
+      .site-hero,
+      .thread-life,
+      .control-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .site-hero {
+        min-height: auto;
+      }
+
+      .site-hero .screenshot-slot {
+        min-height: 500px;
+        transform: none;
+      }
+
+      .thread-life,
+      .control-layout {
+        gap: 48px;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .site-nav,
+      .site-main,
+      .site-footer {
+        width: min(100% - 32px, 1180px);
+      }
+
+      .site-nav__links a:not(.nav-cta) {
+        display: none;
+      }
+
+      .site-hero {
+        gap: 50px;
+        padding: 54px 0 72px;
+      }
+
+      .site-hero h1 {
+        font-size: clamp(52px, 17vw, 72px);
+      }
+
+      .site-hero__lead {
+        font-size: 17px;
+      }
+
+      .site-hero .screenshot-slot {
+        min-height: 360px;
+      }
+
+      .section {
+        padding: 88px 0;
+      }
+
+      .thread-life__story {
+        padding-left: 36px;
+      }
+
+      .life-step::before {
+        left: -31px;
+      }
+
+      .closing {
+        grid-template-columns: 1fr;
+      }
+
+      .closing .button-row {
+        width: 100%;
+      }
+
+      .site-footer {
+        gap: 14px;
+        align-items: flex-start;
+        flex-direction: column;
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="site-shell">
+    <nav class="site-nav" aria-label="Primary navigation">
+      <a class="site-brand" href="#top">
+        <img class="brand-mark" src="../Resources/Icon/BobbinMark.svg" alt="">
+        <span>Bobbin</span>
+      </a>
+      <div class="site-nav__links">
+        <a href="#why">Why Bobbin</a>
+        <a href="#control">Control</a>
+        <a class="nav-cta" href="#get">Get Bobbin</a>
+      </div>
+    </nav>
+
+    <main class="site-main" id="top">
+      <section class="site-hero" aria-labelledby="hero-title">
+        <div>
+          <img class="hero-mark" src="../Resources/Icon/BobbinMark.svg" alt="Bobbin mark">
+          <h1 id="hero-title">Thread <span>lightly.</span></h1>
+          <p class="site-hero__lead">Quick, disposable Codex threads in your Mac menu bar. Keep the useful ones. Let the rest fade away.</p>
+          <div class="button-row">
+            <a class="button" href="#get">Get Bobbin</a>
+            <a class="button secondary" href="#why">See how it works</a>
+          </div>
+        </div>
+        <div class="screenshot-slot has-product-shot">
+          <img class="product-shot" src="../docs/images/bobbin-menubar-demo.svg" alt="Bobbin creates a thread, uses tools, answers, and saves it from the menu bar">
+        </div>
+      </section>
+
+      <section class="section thread-life" id="why" aria-labelledby="why-title">
+        <div>
+          <h2 class="section-heading" id="why-title">Not every thread needs a history.</h2>
+          <p class="section-lead">Bobbin keeps quick agent work close, then quietly makes room for whatever comes next.</p>
+        </div>
+        <ul class="thread-life__story">
+          <li class="life-step">
+            <h3>Start in one click</h3>
+            <p>Open the menu bar, choose a folder, and ask. Your main workspace stays where it was.</p>
+          </li>
+          <li class="life-step fade">
+            <h3>Let the small stuff fade</h3>
+            <p>Unsaved threads grow quieter with age and are deleted after seven days.</p>
+          </li>
+          <li class="life-step keep">
+            <h3>Keep what matters</h3>
+            <p>Save a useful thread and it moves somewhere calm, ready when you need it again.</p>
+          </li>
+        </ul>
+      </section>
+
+      <section class="section control-layout" id="control" aria-labelledby="control-title">
+        <div>
+          <h2 class="section-heading" id="control-title">Tune every thread to the task.</h2>
+          <p class="section-lead">Choose the model, reasoning effort, and trust for each thread. Give new threads the system prompt they need.</p>
+        </div>
+        <img class="control-demo" src="../docs/images/bobbin-controls-demo.svg" alt="Bobbin cycles through model, reasoning, trust, and system prompt settings">
+      </section>
+
+      <section class="section closing" id="get" aria-labelledby="get-title">
+        <h2 id="get-title">Spin up a thread. Keep what matters.</h2>
+        <div class="button-row">
+          <a class="button" href="#top">Get Bobbin</a>
+          <a class="button secondary" href="#control">See controls</a>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <span>Bobbin for macOS 14 and later</span>
+      <span>A tiny Codex app-server client</span>
+    </footer>
+  </div>
+</body>
+</html>
