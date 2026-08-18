@@ -1,54 +1,82 @@
-# Bobbin
+<p align="center">
+  <img src="Resources/Icon/BobbinMark.svg" width="104" alt="Bobbin mark">
+</p>
 
-**Thread lightly.**
+<h1 align="center">Bobbin</h1>
 
-Spin up a thread. Keep what matters.
+<p align="center"><strong>Thread lightly.</strong></p>
 
-A minimal macOS menu bar client for Codex app-server. It keeps its conversations out of the normal Codex and Claude Code history, defaults to GPT-5.6 Luna with `xhigh` reasoning, and supports multiple disposable threads.
+<p align="center">
+  Quick, disposable Codex threads in your Mac menu bar.<br>
+  Keep the useful ones. Let the rest fade away.
+</p>
 
-## Behavior
+![Bobbin menu bar icon above its thread list popover](docs/images/bobbin-menubar-hero.svg)
+
+Bobbin is a small macOS menu bar client for the useful tasks that do not need to live forever in your main agent history. Open a thread, ask Codex, then get back to what you were doing.
+
+## Thread lightly
+
+**Start in one click.** Open Bobbin from the menu bar and begin a focused Codex thread without changing workspaces.
+
+**Let the small stuff fade.** Unsaved threads become quieter with age and are deleted after seven days.
+
+**Keep what matters.** Save a useful thread and it moves to the Saved section, exempt from automatic cleanup.
+
+## Tune every thread to the task
+
+Each thread keeps its own controls:
+
+| Control | What it changes |
+| --- | --- |
+| **Model** | Pick from the Codex models available to your account. |
+| **Reasoning** | Set the effort to match a quick question or a harder piece of work. |
+| **Trust** | Choose `Auto review`, `Allow all`, or `Deny all` for this thread. |
+| **System prompt** | Edit the autosaved instructions inherited by new threads. |
+| **Folder** | Point the thread at the workspace it should work in. |
+
+Review modes map to the app-server like this:
+
+- `Auto review` is the default. It uses `approvalPolicy: on-request`, `approvalsReviewer: auto_review`, and the `workspace-write` sandbox.
+- `Allow all` uses `approvalPolicy: never` and the `danger-full-access` sandbox.
+- `Deny all` uses `approvalPolicy: never` and the `workspace-write` sandbox. Approval requests are never routed to the review subagent.
+
+## How Bobbin works
 
 - Runs `codex app-server --stdio` with an isolated `CODEX_HOME`.
+- Keeps its conversations separate from the normal Codex and Claude Code histories.
 - Uses ChatGPT device-code authentication by default.
-- If `OPENAI_API_KEY` is present in the process or launch-agent environment, asks before using it.
-- Removes `OPENAI_API_KEY` from the app-server environment until the user explicitly opts in.
-- Runs turns with `gpt-5.6-luna` and `xhigh` by default.
-- Gives every thread its own review mode, chosen above the composer and applied from the next turn:
-  - `Auto review` (default) — `approvalPolicy: on-request`, `approvalsReviewer: auto_review`, sandbox `workspace-write`.
-  - `Allow all` — `approvalPolicy: never`, sandbox `danger-full-access`.
-  - `Deny all` — `approvalPolicy: never`, sandbox `workspace-write`, approvals never routed to the review subagent.
-- Shows the Bobbin mark in the menu bar as a template image, so it tints itself for light and dark menu bars.
-- Sorts unsaved threads by last conversation time and fades them as they age.
-- Permanently deletes unsaved app-server threads after seven days.
-- Moves starred or saved threads to the bottom Saved section and exempts them from cleanup.
+- Asks before using an `OPENAI_API_KEY` found in the process or launch-agent environment.
+- Removes `OPENAI_API_KEY` from the app-server environment until you explicitly opt in.
+- Defaults new threads to `gpt-5.6-luna` with `xhigh` reasoning.
+- Supports multiple disposable threads, sorted by recent conversation time.
+- Uses a template menu bar icon that adapts to light and dark menu bars.
 
 ## Demo mode
 
-Demo mode is for product screenshots and other safe UI walkthroughs. Launch with
-`--demo-mode` or `BOBBIN_DEMO_MODE=1`; it uses only a throwaway directory under
-the system temporary directory, removes it on termination, and never reads real
-credentials, starts `codex app-server`, or touches the normal Bobbin state.
+Demo mode provides deterministic content for product screenshots and safe UI walkthroughs.
 
-To show specific content, pass `--demo-data /path/to/state.json` or set
-`BOBBIN_DEMO_DATA`. This also enables demo mode. The file uses the same format
-as Bobbin's own `state.json`, so a copied state file can be edited and reused
-without maintaining a second schema.
+Launch with `--demo-mode` or `BOBBIN_DEMO_MODE=1`. Bobbin uses a throwaway directory under the system temporary directory and removes it on termination. It does not start `codex app-server`.
+
+To show specific content, pass `--demo-data /path/to/state.json` or set `BOBBIN_DEMO_DATA`. This also enables demo mode. The file uses Bobbin's normal `state.json` format, so there is no second fixture schema to maintain.
 
 ## Storage
 
-Runtime data is stored under `~/Library/Application Support/Bobbin/`. Nothing there holds an API key, but two independent sets of conversation data accumulate — the app's own `state.json`, and Codex's isolated home under `CodexHome/`:
+Runtime data lives under `~/Library/Application Support/Bobbin/`. Nothing there holds an API key, but two independent sets of conversation data accumulate: Bobbin's own `state.json` and Codex's isolated home under `CodexHome/`.
 
-- `state.json` — threads, including the full text of every user and assistant message.
-- `CodexHome/auth.json` — Codex credentials.
-- `CodexHome/sessions/*.jsonl` — full conversation rollouts.
-- `CodexHome/logs_2.sqlite` — Codex logs.
-- `CodexHome/memories/` — a git repository containing `MEMORY.md`, `raw_memories.md`, and rollout summaries.
-- `CodexHome/state_5.sqlite` — Codex state.
-- `CodexHome/models_cache.json` — Codex's model cache.
+- `state.json` contains threads and the full text of every user and assistant message.
+- `CodexHome/auth.json` contains Codex credentials.
+- `CodexHome/sessions/*.jsonl` contains full conversation rollouts.
+- `CodexHome/logs_2.sqlite` contains Codex logs.
+- `CodexHome/memories/` is a git repository containing `MEMORY.md`, `raw_memories.md`, and rollout summaries.
+- `CodexHome/state_5.sqlite` contains Codex state.
+- `CodexHome/models_cache.json` contains Codex's model cache.
 
-The seven-day cleanup calls `thread/delete` and drops the thread from `state.json`, but it does not clear `CodexHome/logs_*.sqlite` or `CodexHome/memories/`. Conversation traces therefore accumulate there regardless of thread cleanup.
+The seven-day cleanup calls `thread/delete` and drops the thread from `state.json`. It does not clear `CodexHome/logs_*.sqlite` or `CodexHome/memories/`, so conversation traces continue to accumulate there.
 
 ## Build and test
+
+Bobbin requires macOS 14 or later and a Codex CLI at one of the supported local install paths.
 
 ```sh
 swift build
@@ -56,19 +84,19 @@ swift test
 ./scripts/build-app.sh /path/to/output-directory
 ```
 
-The packaging script creates an ad-hoc signed `Bobbin.app`. The app requires macOS 14 or later and a Codex CLI at one of the supported local install paths.
+The packaging script creates an ad-hoc signed `Bobbin.app`.
 
 ## Icon
 
-The mark is two opposing thick rounded arcs forming an open loop around a small central square. Its geometry lives in `Sources/BobbinIcon` as a single `MarkSpec`, which drives the Dock icon, the menu bar template glyph and the SVG export alike — there is no hand-maintained raster to drift out of step.
+The Bobbin mark is generated from one geometry source. `Sources/BobbinIcon/MarkSpec.swift` drives the app icon, menu bar template glyph, SVG export, and preview sheet, so there is no hand-maintained raster to drift out of step.
 
 ```sh
-swift run bobbin-icon iconset  build/AppIcon.iconset   # app icon renders, 16 → 1024
-swift run bobbin-icon template build/menubar           # monochrome menu bar silhouette
+swift run bobbin-icon iconset  build/AppIcon.iconset
+swift run bobbin-icon template build/menubar
 swift run bobbin-icon svg      Resources/Icon/BobbinMark.svg
-swift run bobbin-icon preview  build/icon-preview.png  # visual-verification sheet
+swift run bobbin-icon preview  build/icon-preview.png
 ```
 
-`build-app.sh` regenerates `AppIcon.icns` on every package, then fails the build unless the bundle declares `CFBundleIconFile`, contains a non-empty icon carrying a 1024 px representation, and passes a strict signature check. Generated `.iconset` and `.icns` files are deliberately not committed.
+`build-app.sh` regenerates `AppIcon.icns` for every package. It fails unless the bundle declares `CFBundleIconFile`, contains a non-empty icon with a 1024 px representation, and passes a strict signature check. Generated `.iconset` and `.icns` files are not committed.
 
 Protocol implementation follows the [official Codex App Server documentation](https://developers.openai.com/codex/app-server) and is verified against bindings generated by the installed Codex CLI.

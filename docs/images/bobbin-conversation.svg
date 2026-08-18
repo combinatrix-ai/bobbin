@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="392" height="560" viewBox="0 0 392 560" role="img" aria-labelledby="title description">
+  <title id="title">Bobbin conversation</title>
+  <desc id="description">A focused agent conversation showing a request, tool activity, a concise response, and thread controls.</desc>
+  <defs>
+    <path id="star" d="M0-6.8 2-2.2 7-2.1 3.1 1 4.4 6 0 3.1-4.4 6-3.1 1-7-2.1-2-2.2Z"/>
+  </defs>
+
+  <rect width="392" height="560" rx="16" fill="#f5f5f2" stroke="#b9bbb5"/>
+
+  <path d="m22 15-6 7 6 7" fill="none" stroke="#4d514b" stroke-linecap="round" stroke-linejoin="round" stroke-width="2"/>
+  <text x="40" y="27" fill="#343832" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13.5" font-weight="700">Tighten the launch story</text>
+  <use href="#star" transform="translate(371 21)" fill="none" stroke="#747872" stroke-width="1.35" stroke-linejoin="round"/>
+
+  <g transform="translate(14 46)" fill="none" stroke="#737770" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.15">
+    <path d="M0 2.5h4l1.7 1.8H13v7.2H0z"/>
+    <path d="M0 4.7h13"/>
+  </g>
+  <text x="35" y="57" fill="#646862" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11.5">Documents</text>
+  <text x="378" y="57" fill="#a0a39d" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="9.8" text-anchor="end">Auto review · luna · xhigh</text>
+  <path d="M1 62.5H391" stroke="#d2d3ce"/>
+
+  <rect x="87" y="74" width="291" height="47" rx="14" fill="#ffffff"/>
+  <text x="96" y="94" fill="#242822" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">
+    <tspan x="96" dy="0">Can you tighten the launch story and show me</tspan>
+    <tspan x="96" dy="15">what changed?</tspan>
+  </text>
+
+  <g fill="none" stroke="#747872" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.1">
+    <rect x="15" y="139" width="10" height="8" rx="1"/>
+    <path d="m18 142 2 1.5-2 1.5M21 145h2"/>
+  </g>
+  <text x="32" y="147" fill="#666a64" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.3">swift test --filter LaunchNarrativeTests</text>
+  <text x="378" y="147" fill="#6f736d" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" text-anchor="end">1.8s</text>
+
+  <path d="m16 160 6-6 2 2-6 6-3 1z" fill="none" stroke="#858983" stroke-linejoin="round" stroke-width="1.1"/>
+  <text x="32" y="163" fill="#696d67" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11.5">3 files changed</text>
+  <text x="378" y="163" fill="#ff3b30" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" text-anchor="end">exit 2</text>
+
+  <g transform="translate(15 171)" fill="none" stroke="#777b74" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.1">
+    <path d="m0 8 8-8 3 3-8 8H0z"/>
+    <path d="m6 2 3 3M8 0l2-2 5 5-2 2"/>
+  </g>
+  <text x="32" y="179" fill="#555952" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11.5">notebook / summarize</text>
+
+  <circle cx="19" cy="192" r="4" fill="none" stroke="#959994" stroke-width="1.1"/>
+  <path d="m22 195 3 3" stroke="#959994" stroke-linecap="round" stroke-width="1.1"/>
+  <text x="32" y="195" fill="#777b75" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="11.5">quiet interfaces for focused work</text>
+  <text x="378" y="195" fill="#767a74" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" text-anchor="end">1.1s</text>
+
+  <text x="14" y="222" fill="#242822" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="13">
+    <tspan x="14" dy="0">The story now opens with the user outcome, then makes the</tspan>
+    <tspan x="14" dy="15">quiet automation visible. I left the final review running so we</tspan>
+    <tspan x="14" dy="15">can inspect its progress.</tspan>
+  </text>
+
+  <path d="M1 488.5H391" stroke="#d2d3ce"/>
+  <rect x="10" y="499" width="334" height="42" rx="14" fill="#ffffff" stroke="#dfdfda"/>
+  <text x="21" y="525" fill="#8b8e88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12.5">Message</text>
+  <circle cx="367" cy="520" r="15" fill="#ff3439"/>
+  <rect x="364" y="517" width="6" height="6" rx="1.2" fill="#ffffff"/>
+</svg>
