@@ -4,10 +4,12 @@ import BobbinCore
 struct RootView: View {
     @ObservedObject var controller: HarnessController
     @ObservedObject private var store: ThreadStore
+    @ObservedObject var session: PopoverSessionState
 
-    init(controller: HarnessController) {
+    init(controller: HarnessController, session: PopoverSessionState) {
         self.controller = controller
         self.store = controller.store
+        self.session = session
     }
 
     var body: some View {
@@ -21,7 +23,7 @@ struct RootView: View {
                 // A restart is progress, not a failure: the thread surface
                 // stays up and HarnessView shows the quiet inline notice.
                 if controller.authState.isAuthenticated {
-                    HarnessView(controller: controller, store: store)
+                    HarnessView(controller: controller, store: store, session: session)
                 } else {
                     LoadingView()
                 }
@@ -30,7 +32,7 @@ struct RootView: View {
                 // surface the failure as the compact inline banner owned by
                 // HarnessView. A boot-time failure still gets a retry pane.
                 if controller.authState.isAuthenticated {
-                    HarnessView(controller: controller, store: store)
+                    HarnessView(controller: controller, store: store, session: session)
                 } else {
                     ServerErrorView(restart: controller.restart)
                 }
@@ -52,7 +54,7 @@ struct RootView: View {
     private var authenticatedContent: some View {
         switch controller.authState {
         case .authenticated:
-            HarnessView(controller: controller, store: store)
+            HarnessView(controller: controller, store: store, session: session)
         case .checking:
             LoadingView()
         case .chooseAPIKey(let source):

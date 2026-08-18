@@ -25,32 +25,43 @@ private func presentFolderChooser(
 /// The popover does not introduce itself: there is no wordmark, badge or
 /// standing health light. The thread list starts with the action the user is
 /// most likely to take, while the conversation owns its own header.
+@MainActor
+final class PopoverSessionState: ObservableObject {
+    enum Destination: Equatable {
+        case threadList
+        case conversation(UUID)
+        case systemPrompt
+    }
+
+    @Published var destination: Destination = .threadList
+    @Published var systemPromptDraft = ""
+}
+
 struct HarnessView: View {
     @ObservedObject var controller: HarnessController
     @ObservedObject var store: ThreadStore
-
-    @State private var showingConversation = false
-    @State private var conversationID: UUID?
-    @State private var showingSystemPrompt = false
+    @ObservedObject var session: PopoverSessionState
 
     var body: some View {
         VStack(spacing: 0) {
-            if showingSystemPrompt {
+            switch session.destination {
+            case .systemPrompt:
                 // A drill-down rather than a sheet. The menu-bar popover closes
                 // the moment it stops being the key window, so any modal
                 // presented from it takes its own parent down with it.
                 SystemPromptView(
                     controller: controller,
-                    back: { showingSystemPrompt = false }
+                    draft: $session.systemPromptDraft,
+                    back: closeSystemPrompt
                 )
-            } else if showingConversation, let conversationID {
+            case .conversation(let conversationID):
                 ConversationView(
                     controller: controller,
                     store: store,
                     threadID: conversationID,
                     back: closeConversation
                 )
-            } else {
+            case .threadList:
                 ThreadListView(
                     controller: controller,
                     store: store,
@@ -60,34 +71,107 @@ struct HarnessView: View {
             }
         }
         .background(.regularMaterial)
-        .onAppear {
-            // The menu-bar popover always opens on the lightweight index.
-            // The selected ID remains persisted by ThreadStore for the next
-            // conversation and for app-server resume.
-            showingConversation = false
-            conversationID = nil
-            showingSystemPrompt = false
-        }
     }
 
     private func openSystemPrompt() {
+        session.systemPromptDraft = store.state.defaultSystemPrompt
         withAnimation(.easeOut(duration: 0.16)) {
-            showingSystemPrompt = true
+            session.destination = .systemPrompt
         }
     }
 
     private func openConversation(_ id: UUID) {
         controller.selectThread(id)
-        conversationID = id
         withAnimation(.easeOut(duration: 0.16)) {
-            showingConversation = true
+            session.destination = .conversation(id)
         }
     }
 
     private func closeConversation() {
         withAnimation(.easeOut(duration: 0.16)) {
-            showingConversation = false
+            session.destination = .threadList
         }
+    }
+
+    private func closeSystemPrompt() {
+        withAnimation(.easeOut(duration: 0.16)) {
+            session.systemPromptDraft = ""
+            session.destination = .threadList
+        }
+    }
+}
+
+/// One shared action treatment for both composers, so the landing field and a
+/// conversation never drift into looking like different controls.
+private struct ComposerActionButton: View {
+    let isRunning: Bool
+    let isDisabled: Bool
+    let helpText: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: isRunning ? "stop.fill" : "arrow.up")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(foregroundColor)
+                .frame(width: 30, height: 30)
+                .background(backgroundColor, in: Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled)
+        .help(helpText)
+        .accessibilityLabel(isRunning ? "Stop generating" : "Send")
+    }
+
+    private var foregroundColor: Color {
+        isDisabled ? Color.primary.opacity(0.55) : Color(nsColor: .windowBackgroundColor)
+    }
+
+    private var backgroundColor: Color {
+        if isRunning { return .red }
+        return isDisabled ? Color.primary.opacity(0.09) : .primary
+    }
+}
+
+/// The shared inset surface around both the new-thread and conversation
+/// composers. Their contents differ, but their geometry should not.
+private struct ComposerSurface<Content: View>: View {
+    private let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(.leading, 11)
+            .padding(.trailing, 5)
+            .padding(.vertical, 5)
+            .background(
+                Color(nsColor: .textBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 13)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 13)
+                    .stroke(Color.primary.opacity(0.09), lineWidth: 1)
+            }
+    }
+}
+
+private struct WorkingDirectoryButton: View {
+    let path: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(URL(fileURLWithPath: path).lastPathComponent, systemImage: "folder")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+        }
+        .buttonStyle(.plain)
+        .help(path)
+        .accessibilityLabel("Working folder: \(path)")
     }
 }
 
@@ -151,46 +235,34 @@ private struct ThreadListView: View {
     }
 
     private var newThreadField: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("New thread…", text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .lineLimit(1...3)
-                .focused($editorFocused)
-                .onKeyPress(.return, phases: .down) { keyPress in
-                    guard !keyPress.modifiers.contains(.shift) else {
-                        return .ignored
-                    }
-                    submit()
-                    return .handled
+        ComposerSurface {
+            HStack(alignment: .bottom, spacing: 8) {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("New thread…", text: $draft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .lineLimit(1...3)
+                        .focused($editorFocused)
+                        .onKeyPress(.return, phases: .down) { keyPress in
+                            guard !keyPress.modifiers.contains(.shift) else {
+                                return .ignored
+                            }
+                            submit()
+                            return .handled
+                        }
+
+                    WorkingDirectoryButton(path: workingDirectory, action: chooseFolder)
                 }
 
-            HStack(spacing: 6) {
-                Button(action: chooseFolder) {
-                    Label(folderName, systemImage: "folder")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .buttonStyle(.plain)
-                .help(workingDirectory)
-                .accessibilityLabel("Working folder: \(workingDirectory)")
-
-                Text("↵")
-                    .font(.system(size: 9.5, design: .monospaced))
-                    .foregroundStyle(.tertiary)
-                    .accessibilityHidden(true)
+                ComposerActionButton(
+                    isRunning: false,
+                    isDisabled: isSendDisabled,
+                    helpText: controller.serverState.isHealthy
+                        ? "Send"
+                        : "Unavailable until the app-server is ready",
+                    action: submit
+                )
             }
-        }
-        .padding(.horizontal, 11)
-        .padding(.vertical, 8)
-        .background(
-            Color(nsColor: .textBackgroundColor),
-            in: RoundedRectangle(cornerRadius: 13)
-        )
-        .overlay {
-            RoundedRectangle(cornerRadius: 13)
-                .stroke(Color.primary.opacity(0.09), lineWidth: 1)
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)
@@ -210,12 +282,16 @@ private struct ThreadListView: View {
         .frame(height: 24)
     }
 
-    private var folderName: String {
-        URL(fileURLWithPath: workingDirectory).lastPathComponent
+    private var isDraftEmpty: Bool {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var isSendDisabled: Bool {
+        isDraftEmpty || controller.serverState != .ready
     }
 
     private func submit() {
-        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard !isDraftEmpty, controller.serverState == .ready else {
             return
         }
 
@@ -319,14 +395,13 @@ private struct SettingsMenu: View {
 ///
 /// It is a page inside the popover rather than a sheet, for the same reason the
 /// conversation is: a sheet needs a host window that stays key, and the
-/// menu-bar popover dismisses itself as soon as it is not. Back discards,
-/// Save commits and returns — there is no separate Cancel, because leaving the
-/// page is the cancel.
+/// menu-bar popover dismisses itself as soon as it is not. Changes are saved as
+/// they are typed, so Back only controls navigation.
 private struct SystemPromptView: View {
     @ObservedObject var controller: HarnessController
+    @Binding var draft: String
     let back: () -> Void
 
-    @State private var draft = ""
     @FocusState private var editorFocused: Bool
 
     var body: some View {
@@ -345,16 +420,6 @@ private struct SystemPromptView: View {
                     .font(.system(size: 12.5, weight: .semibold))
 
                 Spacer(minLength: 3)
-
-                Button("Save") {
-                    controller.updateSystemPrompt(draft)
-                    back()
-                }
-                .buttonStyle(.plain)
-                .font(.system(size: 11.5, weight: .semibold))
-                .foregroundStyle(isDirty ? Color.harnessAccent : Color.secondary)
-                .disabled(!isDirty)
-                .help("Save")
             }
             .padding(.horizontal, 7)
             .frame(height: 38)
@@ -384,12 +449,13 @@ private struct SystemPromptView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
-            draft = controller.store.state.defaultSystemPrompt
             editorFocused = true
         }
+        .onChange(of: draft) { _, newValue in
+            guard newValue != controller.store.state.defaultSystemPrompt else { return }
+            controller.updateSystemPrompt(newValue)
+        }
     }
-
-    private var isDirty: Bool { draft != controller.store.state.defaultSystemPrompt }
 }
 
 /// Renders nothing at all while the app-server is healthy.
@@ -696,41 +762,31 @@ private struct ConversationView: View {
     }
 
     private func composer(_ thread: HarnessThread) -> some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            // A vertical-axis TextField gives the placeholder for free, so the
-            // prompt and the placeholder share one inset and one baseline. It
-            // starts exactly one line tall and grows to `maxComposerLines`
-            // before it starts scrolling.
-            TextField("Message", text: $prompt, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .lineLimit(1...maxComposerLines)
-                .disabled(editingMessageID != nil || controller.isRewriting(thread.id))
-                .padding(.horizontal, 11)
-                .padding(.vertical, 8)
-                .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 13))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 13)
-                        .stroke(Color.primary.opacity(0.09), lineWidth: 1)
-                }
+        ComposerSurface {
+            HStack(alignment: .bottom, spacing: 8) {
+                // A vertical-axis TextField gives the placeholder for free, so the
+                // prompt and the placeholder share one inset and one baseline. It
+                // starts exactly one line tall and grows to `maxComposerLines`
+                // before it starts scrolling.
+                TextField("Message", text: $prompt, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12.5))
+                    .lineLimit(1...maxComposerLines)
+                    .frame(minHeight: 30, alignment: .center)
+                    .disabled(editingMessageID != nil || controller.isRewriting(thread.id))
 
-            Button(action: sendOrStop) {
-                Image(systemName: thread.status == .running ? "stop.fill" : "arrow.up")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color(nsColor: .windowBackgroundColor))
-                    .frame(width: 30, height: 30)
-                    .background(thread.status == .running ? Color.red : Color.primary, in: Circle())
+                ComposerActionButton(
+                    isRunning: thread.status == .running,
+                    isDisabled: isSendDisabled(thread),
+                    helpText: sendHelp(thread),
+                    action: sendOrStop
+                )
+                .keyboardShortcut(
+                    editingMessageID == nil
+                        ? KeyboardShortcut(.return, modifiers: .command)
+                        : nil
+                )
             }
-            .buttonStyle(.plain)
-            .disabled(thread.status == .running ? false : isSendDisabled(thread))
-            .opacity(thread.status == .running || !isPromptEmpty ? 1 : 0.3)
-            .help(sendHelp(thread))
-            .accessibilityLabel(thread.status == .running ? "Stop generating" : "Send")
-            .keyboardShortcut(
-                editingMessageID == nil
-                    ? KeyboardShortcut(.return, modifiers: .command)
-                    : nil
-            )
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)
@@ -889,15 +945,7 @@ private struct ConversationHeader: View {
             .frame(height: 38)
 
             HStack(spacing: 7) {
-                Button(action: chooseFolder) {
-                    Label(folderName, systemImage: "folder")
-                        .font(.system(size: 10.5))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                .buttonStyle(.plain)
-                .help(thread.workingDirectory)
-                .accessibilityLabel("Working folder: \(thread.workingDirectory)")
+                WorkingDirectoryButton(path: thread.workingDirectory, action: chooseFolder)
 
                 Spacer(minLength: 3)
                 ThreadOptionsRow(
@@ -910,10 +958,6 @@ private struct ConversationHeader: View {
             .padding(.horizontal, 13)
             .frame(height: 24)
         }
-    }
-
-    private var folderName: String {
-        URL(fileURLWithPath: thread.workingDirectory).lastPathComponent
     }
 }
 

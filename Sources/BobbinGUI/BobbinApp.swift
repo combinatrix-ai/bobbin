@@ -30,6 +30,7 @@ private final class DemoRootCleanup: NSObject {
 @main
 struct BobbinApp: App {
     @StateObject private var controller: HarnessController
+    @StateObject private var popoverSession = PopoverSessionState()
     private let demoCleanup: DemoRootCleanup?
 
     init() {
@@ -87,7 +88,7 @@ struct BobbinApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            RootView(controller: controller)
+            RootView(controller: controller, session: popoverSession)
                 .frame(width: 392, height: 560)
         } label: {
             // The status item carries the Bobbin mark itself. The image
