@@ -83,6 +83,9 @@ public final class HarnessController: ObservableObject {
     @Published public private(set) var modelVerified = false
     @Published public private(set) var availableModels: [HarnessModelOption] = []
     @Published public private(set) var lastError: String?
+    /// Local threads currently undergoing a server fork/start followed by a
+    /// replacement turn. The UI uses this to disable duplicate actions.
+    @Published public private(set) var rewritingThreadIDs: Set<UUID> = []
 
     public let store: ThreadStore
     /// Demo controllers are fully populated before the view appears and never
@@ -159,6 +162,9 @@ public final class HarnessController: ObservableObject {
     public var selectedThread: HarnessThread? { store.selectedThread }
     public var activeThreads: [HarnessThread] { store.activeThreads }
     public var savedThreads: [HarnessThread] { store.savedThreads }
+    public func isRewriting(_ localThreadID: UUID) -> Bool {
+        rewritingThreadIDs.contains(localThreadID)
+    }
 
     public func toolOutput(for itemID: String) -> String? {
         toolOutputs[itemID]
@@ -338,8 +344,37 @@ public final class HarnessController: ObservableObject {
             lastError = "Sign-in and the app-server are not ready yet."
             return
         }
+        guard let thread = store.state.threads.first(where: { $0.id == localThreadID }) else {
+            report(HarnessError.threadNotFound)
+            return
+        }
+        guard !rewritingThreadIDs.contains(localThreadID) else {
+            lastError = "A rewrite is already in progress."
+            return
+        }
+        guard thread.status != .running, thread.activeTurnID == nil else {
+            lastError = "Wait for the current response to finish first."
+            return
+        }
 
-        Task { await sendTurn(trimmed, localThreadID: localThreadID) }
+        // Claim the thread before yielding to the async request. Without this
+        // synchronous transition, a second send or rewrite can slip in while
+        // `thread/start` / `thread/resume` is still awaiting its response.
+        do {
+            try store.update(localThreadID) { $0.status = .running }
+            objectWillChange.send()
+        } catch {
+            report(error)
+            return
+        }
+
+        Task {
+            do {
+                try await sendTurn(trimmed, localThreadID: localThreadID)
+            } catch {
+                failTurn(error, localThreadID: localThreadID)
+            }
+        }
     }
 
     public func stopThread(_ localThreadID: UUID) {
@@ -408,9 +443,10 @@ public final class HarnessController: ObservableObject {
     static func turnStartParameters(
         threadID: String,
         text: String,
-        thread: HarnessThread
+        thread: HarnessThread,
+        clientUserMessageID: UUID? = nil
     ) -> [String: Any] {
-        [
+        var parameters: [String: Any] = [
             "threadId": threadID,
             "input": [["type": "text", "text": text]],
             "cwd": thread.workingDirectory,
@@ -419,6 +455,420 @@ public final class HarnessController: ObservableObject {
             "model": thread.model,
             "effort": thread.reasoningEffort
         ]
+        if let clientUserMessageID {
+            parameters["clientUserMessageId"] = clientUserMessageID.uuidString
+        }
+        return parameters
+    }
+
+    /// Replaces a user turn and every later local turn with a new prompt.
+    ///
+    /// Codex's stable overwrite path is a fork, rather than the deprecated
+    /// `thread/rollback` marker. The app-server operation completes before
+    /// Bobbin truncates its persisted transcript, so a failed fork leaves the
+    /// visible log untouched.
+    @discardableResult
+    public func editMessage(
+        _ messageID: UUID,
+        replacement: String,
+        in localThreadID: UUID
+    ) -> Bool {
+        guard !isDemoMode else { return false }
+        let replacement = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !replacement.isEmpty else {
+            rejectRewrite("Enter a replacement message.")
+            return false
+        }
+        guard let plan = rewritePlan(
+            messageID: messageID,
+            expectedRole: .user,
+            replacement: replacement,
+            localThreadID: localThreadID
+        ) else { return false }
+        return scheduleRewrite(plan)
+    }
+
+    /// Regenerates an assistant response from its immediately preceding user
+    /// turn, discarding that turn's response and all later turns locally.
+    @discardableResult
+    public func regenerateResponse(
+        _ messageID: UUID,
+        in localThreadID: UUID
+    ) -> Bool {
+        guard !isDemoMode else { return false }
+        guard
+            let thread = store.state.threads.first(where: { $0.id == localThreadID }),
+            let messageIndex = thread.messages.firstIndex(where: { $0.id == messageID }),
+            thread.messages[messageIndex].role == .assistant,
+            let userIndex = thread.messages[..<messageIndex].lastIndex(where: { $0.role == .user })
+        else {
+            rejectRewrite("That response cannot be regenerated.")
+            return false
+        }
+
+        let userMessage = thread.messages[userIndex]
+        let plan = RewritePlan(
+            localThreadID: localThreadID,
+            messageIndex: userIndex,
+            userOrdinal: thread.messages[..<userIndex].filter { $0.role == .user }.count,
+            replacement: userMessage.text,
+            targetTurnID: userMessage.turnID,
+            targetCreatedAt: userMessage.createdAt,
+            executionThread: thread
+        )
+        guard validateRewrite(plan, thread: thread) else { return false }
+        return scheduleRewrite(plan)
+    }
+
+    private struct RewritePlan {
+        let localThreadID: UUID
+        let messageIndex: Int
+        let userOrdinal: Int
+        let replacement: String
+        let targetTurnID: String?
+        let targetCreatedAt: Date
+        /// Freezes model, cwd, sandbox, and approval policy at the instant the
+        /// user commits the rewrite. Header changes made while the network is
+        /// pending apply to the following turn, never half of this one.
+        let executionThread: HarnessThread
+    }
+
+    private struct ServerRewriteResult {
+        let replacementThreadID: String
+        let removedTurnIDs: Set<String>
+    }
+
+    /// The local half of a rewrite is optimistic so notifications for the
+    /// replacement thread have somewhere to land while `turn/start` is in
+    /// flight. This snapshot makes that optimistic mutation reversible if the
+    /// app-server rejects the replacement turn after a successful fork/start.
+    private struct LocalRewriteSnapshot {
+        let thread: HarnessThread
+        let removedMessageIDs: Set<UUID>
+        let removedToolCallIDs: Set<UUID>
+        let removedStreamingMessages: [String: UUID]
+        let removedToolOutputs: [String: String]
+    }
+
+    private func rewritePlan(
+        messageID: UUID,
+        expectedRole: MessageRole,
+        replacement: String,
+        localThreadID: UUID
+    ) -> RewritePlan? {
+        guard
+            let thread = store.state.threads.first(where: { $0.id == localThreadID }),
+            let messageIndex = thread.messages.firstIndex(where: { $0.id == messageID }),
+            thread.messages[messageIndex].role == expectedRole
+        else {
+            rejectRewrite("That message cannot be edited.")
+            return nil
+        }
+
+        let message = thread.messages[messageIndex]
+        let plan = RewritePlan(
+            localThreadID: localThreadID,
+            messageIndex: messageIndex,
+            userOrdinal: thread.messages[..<messageIndex].filter { $0.role == .user }.count,
+            replacement: replacement,
+            targetTurnID: message.turnID,
+            targetCreatedAt: message.createdAt,
+            executionThread: thread
+        )
+        guard validateRewrite(plan, thread: thread) else { return nil }
+        return plan
+    }
+
+    private func validateRewrite(_ plan: RewritePlan, thread: HarnessThread) -> Bool {
+        guard !rewritingThreadIDs.contains(plan.localThreadID) else {
+            rejectRewrite("A rewrite is already in progress.")
+            return false
+        }
+        guard client != nil, authState.isAuthenticated, serverState == .ready, modelVerified else {
+            rejectRewrite("Sign-in and the app-server are not ready yet.")
+            return false
+        }
+        guard thread.codexThreadID != nil else {
+            rejectRewrite("This thread is not ready for rewriting.")
+            return false
+        }
+        guard thread.status != .running, thread.activeTurnID == nil else {
+            rejectRewrite("Wait for the current response to finish first.")
+            return false
+        }
+        return true
+    }
+
+    private func scheduleRewrite(_ plan: RewritePlan) -> Bool {
+        guard rewritingThreadIDs.insert(plan.localThreadID).inserted else {
+            rejectRewrite("A rewrite is already in progress.")
+            return false
+        }
+
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.rewritingThreadIDs.remove(plan.localThreadID) }
+            await self.performRewrite(plan)
+        }
+        return true
+    }
+
+    private func performRewrite(_ plan: RewritePlan) async {
+        do {
+            guard
+                let client,
+                let currentThread = store.state.threads.first(where: { $0.id == plan.localThreadID }),
+                let oldCodexThreadID = currentThread.codexThreadID,
+                oldCodexThreadID == plan.executionThread.codexThreadID
+            else { throw HarnessError.threadNotFound }
+            let executionThread = plan.executionThread
+
+            // The server fork/start is intentionally complete before this
+            // method touches Bobbin's transcript or thread ID.
+            let result = try await serverRewrite(
+                plan: plan,
+                thread: executionThread,
+                oldCodexThreadID: oldCodexThreadID,
+                client: client
+            )
+            let snapshot = try localRewriteSnapshot(
+                plan,
+                removedTurnIDs: result.removedTurnIDs
+            )
+            try truncateForRewrite(
+                plan,
+                replacementThreadID: result.replacementThreadID,
+                snapshot: snapshot
+            )
+            objectWillChange.send()
+            // Both `thread/start` and `thread/fork` return a loaded, subscribed
+            // replacement thread, so resuming it again would add a needless
+            // failure point between truncation and the replacement turn.
+            do {
+                try await sendTurn(
+                    plan.replacement,
+                    localThreadID: plan.localThreadID,
+                    resumeExistingThread: false,
+                    requestConfiguration: executionThread
+                )
+            } catch let turnError {
+                // The fork/start succeeded but the replacement turn did not.
+                // Restore the exact visible transcript and best-effort discard
+                // the unused replacement server thread.
+                do {
+                    try restoreRewrite(snapshot, localThreadID: plan.localThreadID)
+                } catch {
+                    report(error)
+                }
+                _ = try? await client.request(
+                    method: "thread/delete",
+                    params: ["threadId": result.replacementThreadID]
+                )
+                throw turnError
+            }
+        } catch {
+            report(error)
+        }
+    }
+
+    private func serverRewrite(
+        plan: RewritePlan,
+        thread: HarnessThread,
+        oldCodexThreadID: String,
+        client: any HarnessAppServerClient
+    ) async throws -> ServerRewriteResult {
+        if plan.userOrdinal == 0 {
+            let response = try await client.request(
+                method: "thread/start",
+                params: Self.threadStartParameters(for: thread)
+            )
+            return ServerRewriteResult(
+                replacementThreadID: try Self.threadID(from: response, method: "thread/start"),
+                removedTurnIDs: Set(
+                    thread.messages[plan.messageIndex...].compactMap(\.turnID)
+                        + thread.toolCalls.compactMap(\.turnID)
+                )
+            )
+        }
+
+        let readResponse = try await client.request(
+            method: "thread/read",
+            params: ["threadId": oldCodexThreadID, "includeTurns": true]
+        )
+        let serverTurnIDs = try Self.turnIDs(from: readResponse)
+        let localUserCount = thread.messages.filter { $0.role == .user }.count
+        guard serverTurnIDs.count == localUserCount,
+              plan.userOrdinal < serverTurnIDs.count
+        else {
+            throw HarnessError.malformedResponse("thread/read.turns")
+        }
+        if let targetTurnID = plan.targetTurnID,
+           targetTurnID != serverTurnIDs[plan.userOrdinal] {
+            throw HarnessError.malformedResponse("thread/read.turns")
+        }
+
+        let priorTurnID = serverTurnIDs[plan.userOrdinal - 1]
+        var forkParameters = Self.threadResumeParameters(
+            threadID: oldCodexThreadID,
+            thread: thread
+        )
+        forkParameters["lastTurnId"] = priorTurnID
+        let forkResponse = try await client.request(
+            method: "thread/fork",
+            params: forkParameters
+        )
+        return ServerRewriteResult(
+            replacementThreadID: try Self.threadID(from: forkResponse, method: "thread/fork"),
+            removedTurnIDs: Set(serverTurnIDs[plan.userOrdinal...])
+        )
+    }
+
+    private func localRewriteSnapshot(
+        _ plan: RewritePlan,
+        removedTurnIDs: Set<String>
+    ) throws -> LocalRewriteSnapshot {
+        guard let thread = store.state.threads.first(where: { $0.id == plan.localThreadID }) else {
+            throw HarnessError.threadNotFound
+        }
+
+        let removedMessages = Array(thread.messages.dropFirst(plan.messageIndex))
+        let removedMessageIDs = Set(removedMessages.map(\.id))
+        let removedToolCalls = thread.toolCalls.filter { toolCall in
+            if let turnID = toolCall.turnID {
+                return removedTurnIDs.contains(turnID)
+            }
+            // Messages/calls written before turn ownership was persisted do
+            // not have a reliable boundary other than their event timestamp.
+            return toolCall.createdAt >= plan.targetCreatedAt
+        }
+        let removedToolCallIDs = Set(removedToolCalls.map(\.id))
+        let removedToolItemIDs = Set(removedToolCalls.map(\.itemID))
+
+        return LocalRewriteSnapshot(
+            thread: thread,
+            removedMessageIDs: removedMessageIDs,
+            removedToolCallIDs: removedToolCallIDs,
+            removedStreamingMessages: streamingMessages.filter {
+                removedMessageIDs.contains($0.value)
+            },
+            removedToolOutputs: toolOutputs.filter {
+                removedToolItemIDs.contains($0.key)
+            }
+        )
+    }
+
+    private func truncateForRewrite(
+        _ plan: RewritePlan,
+        replacementThreadID: String,
+        snapshot: LocalRewriteSnapshot
+    ) throws {
+        let removedToolItemIDs = Set(
+            snapshot.thread.toolCalls
+                .filter { snapshot.removedToolCallIDs.contains($0.id) }
+                .map(\.itemID)
+        )
+
+        try store.update(plan.localThreadID) { current in
+            current.messages.removeSubrange(plan.messageIndex..<current.messages.count)
+            current.toolCalls.removeAll { snapshot.removedToolCallIDs.contains($0.id) }
+            current.codexThreadID = replacementThreadID
+            current.activeTurnID = nil
+            current.status = .idle
+        }
+
+        streamingMessages = streamingMessages.filter {
+            !snapshot.removedMessageIDs.contains($0.value)
+        }
+        for itemID in removedToolItemIDs {
+            toolOutputs.removeValue(forKey: itemID)
+        }
+    }
+
+    private func restoreRewrite(
+        _ snapshot: LocalRewriteSnapshot,
+        localThreadID: UUID
+    ) throws {
+        guard let current = store.state.threads.first(where: { $0.id == localThreadID }) else {
+            throw HarnessError.threadNotFound
+        }
+
+        let originalMessageIDs = Set(snapshot.thread.messages.map(\.id))
+        let failedMessageIDs = Set(current.messages.map(\.id)).subtracting(originalMessageIDs)
+        let originalToolCallIDs = Set(snapshot.thread.toolCalls.map(\.id))
+        let failedToolItemIDs = Set(
+            current.toolCalls
+                .filter { !originalToolCallIDs.contains($0.id) }
+                .map(\.itemID)
+        )
+
+        var persistenceError: Error?
+        do {
+            try store.update(localThreadID) { thread in
+                // Preserve settings and save-state changes made while the network
+                // request was pending; only the conversational fields roll back.
+                thread.codexThreadID = snapshot.thread.codexThreadID
+                thread.activeTurnID = snapshot.thread.activeTurnID
+                thread.title = snapshot.thread.title
+                thread.lastConversationAt = snapshot.thread.lastConversationAt
+                thread.status = snapshot.thread.status
+                thread.messages = snapshot.thread.messages
+                thread.toolCalls = snapshot.thread.toolCalls
+            }
+        } catch {
+            // `ThreadStore.update` mutates memory before persistence, so finish
+            // restoring controller-only state even if the disk write failed.
+            persistenceError = error
+        }
+
+        streamingMessages = streamingMessages.filter {
+            !failedMessageIDs.contains($0.value)
+        }
+        for (key, value) in snapshot.removedStreamingMessages {
+            streamingMessages[key] = value
+        }
+        for itemID in failedToolItemIDs {
+            toolOutputs.removeValue(forKey: itemID)
+        }
+        for (itemID, output) in snapshot.removedToolOutputs {
+            toolOutputs[itemID] = output
+        }
+        objectWillChange.send()
+        if let persistenceError { throw persistenceError }
+    }
+
+    private static func threadID(
+        from response: CodexAppServerClient.JSONObject,
+        method: String
+    ) throws -> String {
+        guard
+            let thread = response["thread"] as? [String: Any],
+            let id = thread["id"] as? String,
+            !id.isEmpty
+        else {
+            throw HarnessError.malformedResponse("\(method).thread.id")
+        }
+        return id
+    }
+
+    private static func turnIDs(
+        from response: CodexAppServerClient.JSONObject
+    ) throws -> [String] {
+        guard
+            let thread = response["thread"] as? [String: Any],
+            let rawTurns = thread["turns"] as? [Any]
+        else {
+            throw HarnessError.malformedResponse("thread/read.turns")
+        }
+
+        let ids = rawTurns.compactMap { ($0 as? [String: Any])?["id"] as? String }
+        guard ids.count == rawTurns.count, ids.allSatisfy({ !$0.isEmpty }) else {
+            throw HarnessError.malformedResponse("thread/read.turns")
+        }
+        return ids
+    }
+
+    private func rejectRewrite(_ message: String) {
+        lastError = message
     }
 
     private func bootSequence() async {
@@ -566,78 +1016,116 @@ public final class HarnessController: ObservableObject {
         }
     }
 
-    private func sendTurn(_ text: String, localThreadID: UUID) async {
-        guard let client else { return }
-        do {
-            guard var thread = store.state.threads.first(where: { $0.id == localThreadID }) else {
+    private func sendTurn(
+        _ text: String,
+        localThreadID: UUID,
+        resumeExistingThread: Bool = true,
+        requestConfiguration: HarnessThread? = nil
+    ) async throws {
+        guard let client else { throw HarnessError.appServerStopped("") }
+        guard var thread = store.state.threads.first(where: { $0.id == localThreadID }) else {
+            throw HarnessError.threadNotFound
+        }
+        let requestThread = requestConfiguration ?? thread
+
+        if thread.codexThreadID == nil {
+            let response = try await client.request(
+                method: "thread/start",
+                params: Self.threadStartParameters(for: requestThread)
+            )
+            let codexID = try Self.threadID(from: response, method: "thread/start")
+            // A rewrite cannot run while an ordinary send owns the thread, but
+            // still verify the identity after every await before mutating the
+            // persisted transcript.
+            guard store.state.threads.first(where: { $0.id == localThreadID })?.codexThreadID == nil else {
+                throw HarnessError.malformedResponse("thread identity changed during thread/start")
+            }
+            try store.update(localThreadID) { $0.codexThreadID = codexID }
+            thread.codexThreadID = codexID
+        } else if resumeExistingThread {
+            guard let existingThreadID = thread.codexThreadID else {
                 throw HarnessError.threadNotFound
             }
-
-            if thread.codexThreadID == nil {
-                let response = try await client.request(
-                    method: "thread/start",
-                    params: Self.threadStartParameters(for: thread)
-                )
-                guard
-                    let resultThread = response["thread"] as? [String: Any],
-                    let codexID = resultThread["id"] as? String
-                else {
-                    throw HarnessError.malformedResponse("thread/start.thread.id")
-                }
-                try store.update(localThreadID) { $0.codexThreadID = codexID }
-                thread.codexThreadID = codexID
-            } else {
-                guard let existingThreadID = thread.codexThreadID else {
-                    throw HarnessError.threadNotFound
-                }
-                _ = try await client.request(
-                    method: "thread/resume",
-                    params: Self.threadResumeParameters(
-                        threadID: existingThreadID,
-                        thread: thread
-                    )
-                )
-            }
-
-            guard let codexThreadID = thread.codexThreadID else {
-                throw HarnessError.missingResult("thread/start")
-            }
-            let now = Date()
-            try store.update(localThreadID) { current in
-                current.messages.append(ChatMessage(role: .user, text: text, createdAt: now))
-                current.lastConversationAt = now
-                current.status = .running
-                if current.messages.filter({ $0.role == .user }).count == 1 {
-                    current.title = Self.title(from: text)
-                }
-            }
-            objectWillChange.send()
-
-            let response = try await client.request(
-                method: "turn/start",
-                params: Self.turnStartParameters(
-                    threadID: codexThreadID,
-                    text: text,
-                    thread: thread
+            _ = try await client.request(
+                method: "thread/resume",
+                params: Self.threadResumeParameters(
+                    threadID: existingThreadID,
+                    thread: requestThread
                 )
             )
-            guard
-                let turn = response["turn"] as? [String: Any],
-                let turnID = turn["id"] as? String
+            guard store.state.threads.first(where: { $0.id == localThreadID })?.codexThreadID
+                    == existingThreadID
             else {
-                throw HarnessError.malformedResponse("turn/start.turn.id")
+                throw HarnessError.malformedResponse("thread identity changed during thread/resume")
             }
-            try store.update(localThreadID) { $0.activeTurnID = turnID }
-            objectWillChange.send()
-        } catch {
-            try? store.update(localThreadID) { thread in
-                thread.status = .failed
-                thread.activeTurnID = nil
-                thread.messages.append(ChatMessage(role: .system, text: error.localizedDescription))
-            }
-            objectWillChange.send()
-            report(error)
         }
+
+        guard let codexThreadID = thread.codexThreadID else {
+            throw HarnessError.missingResult("thread/start")
+        }
+        guard store.state.threads.first(where: { $0.id == localThreadID })?.codexThreadID
+                == codexThreadID
+        else {
+            throw HarnessError.malformedResponse("thread identity changed before turn/start")
+        }
+        let now = Date()
+        let userMessageID = UUID()
+        try store.update(localThreadID) { current in
+            current.messages.append(
+                ChatMessage(
+                    id: userMessageID,
+                    role: .user,
+                    text: text,
+                    createdAt: now
+                )
+            )
+            current.lastConversationAt = now
+            current.status = .running
+            if current.messages.filter({ $0.role == .user }).count == 1 {
+                current.title = Self.title(from: text)
+            }
+        }
+        objectWillChange.send()
+
+        let response = try await client.request(
+            method: "turn/start",
+            params: Self.turnStartParameters(
+                threadID: codexThreadID,
+                text: text,
+                thread: requestThread,
+                clientUserMessageID: userMessageID
+            )
+        )
+        guard
+            let turn = response["turn"] as? [String: Any],
+            let turnID = turn["id"] as? String
+        else {
+            throw HarnessError.malformedResponse("turn/start.turn.id")
+        }
+        guard
+            let current = store.state.threads.first(where: { $0.id == localThreadID }),
+            current.codexThreadID == codexThreadID,
+            current.messages.contains(where: { $0.id == userMessageID })
+        else {
+            throw HarnessError.malformedResponse("thread identity changed during turn/start")
+        }
+        try store.update(localThreadID) { current in
+            current.activeTurnID = turnID
+            if let index = current.messages.firstIndex(where: { $0.id == userMessageID }) {
+                current.messages[index].turnID = turnID
+            }
+        }
+        objectWillChange.send()
+    }
+
+    private func failTurn(_ error: Error, localThreadID: UUID) {
+        try? store.update(localThreadID) { thread in
+            thread.status = .failed
+            thread.activeTurnID = nil
+            thread.messages.append(ChatMessage(role: .system, text: error.localizedDescription))
+        }
+        objectWillChange.send()
+        report(error)
     }
 
     private func cleanupExpiredThreads(using client: CodexAppServerClient) async {
@@ -702,14 +1190,16 @@ public final class HarnessController: ObservableObject {
         else { return }
 
         let key = "\(codexThreadID):\(itemID)"
+        let turnID = params["turnId"] as? String
         do {
             if let messageID = streamingMessages[key] {
                 try store.update(localThread.id, persistImmediately: false) { thread in
                     guard let index = thread.messages.firstIndex(where: { $0.id == messageID }) else { return }
                     thread.messages[index].text += delta
+                    if let turnID { thread.messages[index].turnID = turnID }
                 }
             } else {
-                let message = ChatMessage(role: .assistant, text: delta)
+                let message = ChatMessage(role: .assistant, text: delta, turnID: turnID)
                 streamingMessages[key] = message.id
                 try store.update(localThread.id, persistImmediately: false) {
                     $0.messages.append(message)
@@ -771,13 +1261,27 @@ public final class HarnessController: ObservableObject {
             let localThread = store.state.threads.first(where: { $0.codexThreadID == codexThreadID })
         else { return }
 
-        guard !localThread.toolCalls.contains(where: { $0.itemID == itemID }) else { return }
+        let turnID = params["turnId"] as? String
+        if localThread.toolCalls.contains(where: { $0.itemID == itemID }) {
+            if let turnID, localThread.toolCalls.first(where: { $0.itemID == itemID })?.turnID == nil {
+                do {
+                    try store.update(localThread.id) { thread in
+                        guard let index = thread.toolCalls.firstIndex(where: { $0.itemID == itemID }) else { return }
+                        thread.toolCalls[index].turnID = turnID
+                    }
+                } catch {
+                    report(error)
+                }
+            }
+            return
+        }
 
         let toolCall = ToolCall(
             itemID: itemID,
             kind: info.kind,
             label: info.label,
             status: .running,
+            turnID: turnID,
             createdAt: Self.date(fromMilliseconds: params["startedAtMs"]) ?? Date()
         )
 
@@ -802,14 +1306,18 @@ public final class HarnessController: ObservableObject {
             guard let text = item["text"] as? String else { return }
 
             let key = "\(codexThreadID):\(itemID)"
+            let turnID = params["turnId"] as? String
             do {
                 if let messageID = streamingMessages.removeValue(forKey: key) {
                     try store.update(localThread.id) { thread in
                         guard let index = thread.messages.firstIndex(where: { $0.id == messageID }) else { return }
                         thread.messages[index].text = text
+                        if let turnID { thread.messages[index].turnID = turnID }
                     }
                 } else {
-                    try store.update(localThread.id) { $0.messages.append(ChatMessage(role: .assistant, text: text)) }
+                    try store.update(localThread.id) {
+                        $0.messages.append(ChatMessage(role: .assistant, text: text, turnID: turnID))
+                    }
                 }
                 objectWillChange.send()
             } catch {
@@ -823,6 +1331,7 @@ public final class HarnessController: ObservableObject {
             let durationMs = Self.intValue(item["durationMs"])
             let status = Self.toolCallStatus(for: item, exitCode: exitCode)
             let createdAt = Self.date(fromMilliseconds: params["completedAtMs"]) ?? Date()
+            let turnID = params["turnId"] as? String
 
             if let output = item["aggregatedOutput"] as? String, !output.isEmpty {
                 toolOutputs[itemID] = Self.truncatedToolOutput(output)
@@ -836,6 +1345,7 @@ public final class HarnessController: ObservableObject {
                         thread.toolCalls[index].status = status
                         thread.toolCalls[index].exitCode = exitCode
                         thread.toolCalls[index].durationMs = durationMs
+                        if let turnID { thread.toolCalls[index].turnID = turnID }
                     } else {
                         thread.toolCalls.append(
                             ToolCall(
@@ -845,6 +1355,7 @@ public final class HarnessController: ObservableObject {
                                 status: status,
                                 exitCode: exitCode,
                                 durationMs: durationMs,
+                                turnID: turnID,
                                 createdAt: createdAt
                             )
                         )

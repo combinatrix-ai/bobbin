@@ -590,6 +590,8 @@ private struct ConversationView: View {
 
     @State private var prompt = ""
     @State private var showingServerDetail = false
+    @State private var editingMessageID: UUID?
+    @State private var editDraft = ""
 
     private var thread: HarnessThread? {
         store.state.threads.first { $0.id == threadID }
@@ -634,7 +636,23 @@ private struct ConversationView: View {
                     ForEach(transcriptBlocks(for: thread)) { block in
                         switch block {
                         case .message(let message):
-                            MessageBubble(message: message)
+                            MessageBubble(
+                                message: message,
+                                isEditing: editingMessageID == message.id,
+                                editDraft: $editDraft,
+                                showsEditAction: showsEditAction(for: message, in: thread),
+                                showsRegenerateAction: showsRegenerateAction(
+                                    for: message,
+                                    in: thread
+                                ),
+                                actionsEnabled: rewriteActionsEnabled(for: thread),
+                                beginEditing: { beginEditing(message) },
+                                cancelEditing: cancelEditing,
+                                submitEdit: { submitEdit(message, in: thread) },
+                                regenerate: {
+                                    controller.regenerateResponse(message.id, in: thread.id)
+                                }
+                            )
                                 .id("message:\(message.id.uuidString)")
                         case .toolCalls(let toolCalls):
                             ToolCallGroup(controller: controller, toolCalls: toolCalls)
@@ -687,6 +705,7 @@ private struct ConversationView: View {
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
                 .lineLimit(1...maxComposerLines)
+                .disabled(editingMessageID != nil || controller.isRewriting(thread.id))
                 .padding(.horizontal, 11)
                 .padding(.vertical, 8)
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 13))
@@ -703,16 +722,23 @@ private struct ConversationView: View {
                     .background(thread.status == .running ? Color.red : Color.primary, in: Circle())
             }
             .buttonStyle(.plain)
-            .disabled(thread.status == .running ? false : isPromptEmpty || controller.serverState != .ready)
+            .disabled(thread.status == .running ? false : isSendDisabled(thread))
             .opacity(thread.status == .running || !isPromptEmpty ? 1 : 0.3)
             .help(sendHelp(thread))
             .accessibilityLabel(thread.status == .running ? "Stop generating" : "Send")
-            .keyboardShortcut(.return, modifiers: .command)
+            .keyboardShortcut(
+                editingMessageID == nil
+                    ? KeyboardShortcut(.return, modifiers: .command)
+                    : nil
+            )
         }
         .padding(.horizontal, 10)
         .padding(.top, 8)
         .padding(.bottom, 10)
         .overlay(alignment: .top) { Divider() }
+        .opacity(
+            editingMessageID == nil && !controller.isRewriting(thread.id) ? 1 : 0.55
+        )
     }
 
     /// Explains the disabled send button rather than leaving it inert and
@@ -730,6 +756,16 @@ private struct ConversationView: View {
         prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private func isSendDisabled(_ thread: HarnessThread) -> Bool {
+        thread.status != .running
+            && (
+                editingMessageID != nil
+                    || controller.isRewriting(thread.id)
+                    || isPromptEmpty
+                    || controller.serverState != .ready
+            )
+    }
+
     private func isAwaitingAssistant(_ thread: HarnessThread) -> Bool {
         thread.status == .running && thread.messages.last?.role == .user
     }
@@ -739,9 +775,68 @@ private struct ConversationView: View {
         if thread.status == .running {
             controller.stopThread(thread.id)
         } else {
+            guard editingMessageID == nil else { return }
             let outgoing = prompt
             prompt = ""
             controller.send(outgoing, in: thread.id)
+        }
+    }
+
+    private func showsEditAction(for message: ChatMessage, in thread: HarnessThread) -> Bool {
+        message.role == .user
+            && thread.status != .running
+            && editingMessageID == nil
+            && !controller.isRewriting(thread.id)
+            && !controller.isDemoMode
+    }
+
+    private func showsRegenerateAction(
+        for message: ChatMessage,
+        in thread: HarnessThread
+    ) -> Bool {
+        guard
+            message.role == .assistant,
+            thread.status != .running,
+            editingMessageID == nil,
+            !controller.isRewriting(thread.id),
+            !controller.isDemoMode,
+            let index = thread.messages.firstIndex(where: { $0.id == message.id }),
+            thread.messages[..<index].contains(where: { $0.role == .user })
+        else { return false }
+
+        // A turn can emit more than one assistant item around tool calls. Keep
+        // one Regenerate action on the final assistant item for that turn.
+        for following in thread.messages.dropFirst(index + 1) {
+            if following.role == .user { break }
+            if following.role == .assistant { return false }
+        }
+        return true
+    }
+
+    private func rewriteActionsEnabled(for thread: HarnessThread) -> Bool {
+        thread.status != .running
+            && !controller.isRewriting(thread.id)
+            && controller.serverState == .ready
+            && controller.authState.isAuthenticated
+            && controller.modelVerified
+    }
+
+    private func beginEditing(_ message: ChatMessage) {
+        guard message.role == .user else { return }
+        editDraft = message.text
+        editingMessageID = message.id
+    }
+
+    private func cancelEditing() {
+        editingMessageID = nil
+        editDraft = ""
+    }
+
+    private func submitEdit(_ message: ChatMessage, in thread: HarnessThread) {
+        let replacement = editDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !replacement.isEmpty, rewriteActionsEnabled(for: thread) else { return }
+        if controller.editMessage(message.id, replacement: replacement, in: thread.id) {
+            cancelEditing()
         }
     }
 
@@ -1122,16 +1217,166 @@ private struct PendingReplyIndicator: View {
 
 private struct MessageBubble: View {
     let message: ChatMessage
+    let isEditing: Bool
+    @Binding var editDraft: String
+    let showsEditAction: Bool
+    let showsRegenerateAction: Bool
+    let actionsEnabled: Bool
+    let beginEditing: () -> Void
+    let cancelEditing: () -> Void
+    let submitEdit: () -> Void
+    let regenerate: () -> Void
 
+    @State private var isHovering = false
+    @FocusState private var editFieldFocused: Bool
+    @FocusState private var rewriteButtonFocused: Bool
+
+    @ViewBuilder
     var body: some View {
+        VStack(
+            alignment: message.role == .user ? .trailing : .leading,
+            spacing: 2
+        ) {
+            if isEditing {
+                inlineEditor
+            } else {
+                messageContent
+
+                if showsEditAction {
+                    rewriteButton(
+                        systemImage: "pencil",
+                        help: actionsEnabled
+                            ? "Edit this message and replace everything after it"
+                            : "Unavailable until the app-server is ready",
+                        accessibilityLabel: "Edit message",
+                        accessibilityIdentifier: "message.edit.\(message.id.uuidString)",
+                        action: beginEditing
+                    )
+                } else if showsRegenerateAction {
+                    rewriteButton(
+                        systemImage: "arrow.clockwise",
+                        help: actionsEnabled
+                            ? "Regenerate this response and replace everything after it"
+                            : "Unavailable until the app-server is ready",
+                        accessibilityLabel: "Regenerate response",
+                        accessibilityIdentifier: "message.regenerate.\(message.id.uuidString)",
+                        action: regenerate
+                    )
+                }
+            }
+        }
+        .frame(
+            maxWidth: .infinity,
+            alignment: message.role == .user ? .trailing : .leading
+        )
+        .onHover { isHovering = $0 }
+    }
+
+    private var messageText: some View {
         Text(message.text)
             .font(.system(size: 12.5))
             .textSelection(.enabled)
-            .foregroundStyle(message.role == .system ? Color.red : Color.primary)
-            .padding(message.role == .user ? 8 : 0)
-            .background(message.role == .user ? Color(nsColor: .controlBackgroundColor) : .clear)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
-            .frame(maxWidth: .infinity, alignment: message.role == .user ? .trailing : .leading)
-            .accessibilityLabel(message.text)
+    }
+
+    @ViewBuilder
+    private var messageContent: some View {
+        if message.role == .user {
+            messageText
+                .foregroundStyle(Color.primary)
+                .padding(8)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .accessibilityLabel(message.text)
+                .accessibilityIdentifier("message.user.\(message.id.uuidString)")
+        } else {
+            messageText
+                .foregroundStyle(message.role == .system ? Color.red : Color.primary)
+                .accessibilityLabel(message.text)
+                .accessibilityIdentifier("message.\(message.role.rawValue).\(message.id.uuidString)")
+        }
+    }
+
+    private var inlineEditor: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            TextField("Edit message", text: $editDraft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12.5))
+                .lineLimit(1...5)
+                .focused($editFieldFocused)
+                .onKeyPress(.escape, phases: .down) { _ in
+                    cancelEditing()
+                    return .handled
+                }
+                .onKeyPress(.return, phases: .down) { keyPress in
+                    guard keyPress.modifiers.contains(.command), !isEditSubmitDisabled else {
+                        return .ignored
+                    }
+                    submitEdit()
+                    return .handled
+                }
+                .accessibilityIdentifier("message.edit-field.\(message.id.uuidString)")
+
+            HStack(spacing: 7) {
+                Button("Cancel", action: cancelEditing)
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.secondary)
+                    .keyboardShortcut(.cancelAction)
+                    .accessibilityLabel("Cancel editing")
+                    .accessibilityIdentifier("message.edit-cancel.\(message.id.uuidString)")
+
+                Button(action: submitEdit) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 10.5, weight: .bold))
+                        .foregroundStyle(Color(nsColor: .windowBackgroundColor))
+                        .frame(width: 27, height: 27)
+                        .background(
+                            isEditSubmitDisabled ? Color.primary.opacity(0.15) : .primary,
+                            in: Circle()
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(isEditSubmitDisabled)
+                .help("Send edited message")
+                .accessibilityLabel("Send edited message")
+                .accessibilityIdentifier("message.edit-submit.\(message.id.uuidString)")
+            }
+        }
+        .padding(8)
+        .background(Color(nsColor: .textBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.primary.opacity(0.13), lineWidth: 1)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+        .onAppear { editFieldFocused = true }
+    }
+
+    private var isEditSubmitDisabled: Bool {
+        !actionsEnabled || editDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private func rewriteButton(
+        systemImage: String,
+        help: String,
+        accessibilityLabel: String,
+        accessibilityIdentifier: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 18, height: 16)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!actionsEnabled)
+        .focused($rewriteButtonFocused)
+        .opacity(actionsEnabled ? (isHovering || rewriteButtonFocused ? 0.9 : 0.48) : 0.25)
+        .help(help)
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 }

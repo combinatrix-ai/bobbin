@@ -29,6 +29,7 @@ final class ToolCallTests: XCTestCase {
         XCTAssertEqual(toolCall.kind, .command)
         XCTAssertEqual(toolCall.label, "swift build")
         XCTAssertEqual(toolCall.status, .running)
+        XCTAssertEqual(toolCall.turnID, "turn-1")
         XCTAssertEqual(toolCall.createdAt, startedAt)
     }
 
@@ -112,6 +113,7 @@ final class ToolCallTests: XCTestCase {
         XCTAssertEqual(toolCall.kind, .webSearch)
         XCTAssertEqual(toolCall.label, "Swift concurrency")
         XCTAssertEqual(toolCall.status, .succeeded)
+        XCTAssertEqual(toolCall.turnID, "turn-1")
         XCTAssertEqual(toolCall.createdAt, Date(timeIntervalSince1970: 2_000_000))
     }
 
@@ -149,6 +151,41 @@ final class ToolCallTests: XCTestCase {
         XCTAssertEqual(decoded.toolCalls, [call])
         XCTAssertFalse(rawJSON.contains(output))
         XCTAssertFalse(rawJSON.contains("aggregatedOutput"))
+    }
+
+    func testTranscriptTurnIDsRoundTripAndRemainOptionalForLegacyState() throws {
+        let message = ChatMessage(role: .user, text: "hello", turnID: "turn-1")
+        let call = ToolCall(
+            itemID: "item-1",
+            kind: .command,
+            label: "swift test",
+            status: .succeeded,
+            turnID: "turn-1"
+        )
+        let thread = HarnessThread(
+            workingDirectory: "/tmp/project",
+            messages: [message],
+            toolCalls: [call]
+        )
+
+        let data = try JSONEncoder().encode(thread)
+        let decoded = try JSONDecoder().decode(HarnessThread.self, from: data)
+
+        XCTAssertEqual(decoded.messages.first?.turnID, "turn-1")
+        XCTAssertEqual(decoded.toolCalls.first?.turnID, "turn-1")
+
+        var legacyObject = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var legacyMessages = try XCTUnwrap(legacyObject["messages"] as? [[String: Any]])
+        legacyMessages[0].removeValue(forKey: "turnID")
+        legacyObject["messages"] = legacyMessages
+        var legacyCalls = try XCTUnwrap(legacyObject["toolCalls"] as? [[String: Any]])
+        legacyCalls[0].removeValue(forKey: "turnID")
+        legacyObject["toolCalls"] = legacyCalls
+
+        let legacyData = try JSONSerialization.data(withJSONObject: legacyObject)
+        let legacy = try JSONDecoder().decode(HarnessThread.self, from: legacyData)
+        XCTAssertNil(legacy.messages.first?.turnID)
+        XCTAssertNil(legacy.toolCalls.first?.turnID)
     }
 
     func testToolOutputKeepsOnlyTheLastTwoHundredLinesAndThirtyTwoKilobytes() throws {
@@ -253,6 +290,7 @@ final class ToolCallTests: XCTestCase {
 
         let thread = try XCTUnwrap(fixture.controller.store.state.threads.first { $0.id == threadID })
         XCTAssertEqual(thread.messages.map(\.text), ["Done."])
+        XCTAssertEqual(thread.messages.first?.turnID, "turn-1")
         XCTAssertTrue(thread.toolCalls.isEmpty)
     }
 

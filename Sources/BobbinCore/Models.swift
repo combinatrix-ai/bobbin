@@ -10,17 +10,22 @@ public struct ChatMessage: Codable, Identifiable, Equatable, Sendable {
     public let id: UUID
     public let role: MessageRole
     public var text: String
+    /// App-server turn ownership. Older persisted messages decode this as nil
+    /// and are reconciled from `thread/read` when a rewrite needs the boundary.
+    public var turnID: String?
     public let createdAt: Date
 
     public init(
         id: UUID = UUID(),
         role: MessageRole,
         text: String,
+        turnID: String? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
         self.role = role
         self.text = text
+        self.turnID = turnID
         self.createdAt = createdAt
     }
 }
@@ -48,6 +53,9 @@ public struct ToolCall: Codable, Identifiable, Equatable, Sendable {
     public var status: ToolCallStatus
     public var exitCode: Int?
     public var durationMs: Int?
+    /// The turn that produced this call, used to remove exactly the rewritten
+    /// suffix without depending on wall-clock ordering.
+    public var turnID: String?
     public let createdAt: Date
 
     public init(
@@ -58,6 +66,7 @@ public struct ToolCall: Codable, Identifiable, Equatable, Sendable {
         status: ToolCallStatus,
         exitCode: Int? = nil,
         durationMs: Int? = nil,
+        turnID: String? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -67,6 +76,7 @@ public struct ToolCall: Codable, Identifiable, Equatable, Sendable {
         self.status = status
         self.exitCode = exitCode
         self.durationMs = durationMs
+        self.turnID = turnID
         self.createdAt = createdAt
     }
 }
