@@ -199,11 +199,6 @@ private struct ThreadListView: View {
 
     private var threadHeader: some View {
         HStack(spacing: 5) {
-            Text("THREADS")
-                .font(.system(size: 10, weight: .semibold))
-                .tracking(0.2)
-                .foregroundStyle(.secondary)
-
             Spacer(minLength: 3)
 
             SettingsMenu(
