@@ -6,12 +6,13 @@
 
 <p align="center"><strong>Thread lightly.</strong></p>
 
-<p align="center">
-  Quick, disposable Codex threads in your Mac menu bar.<br>
-  Keep the useful ones. Let the rest fade away.
-</p>
+<p align="center">Spin up a thread. Keep what matters.</p>
 
-![Bobbin menu bar icon above its thread list popover](docs/images/bobbin-menubar-hero.svg)
+<!-- Temporary reference: replace this demo image with the real opaque
+     docs/images/bobbin-hero.png capture at width="720" once it is captured. -->
+<p align="center">
+  <img src="docs/images/bobbin-menubar-hero.svg" width="720" alt="Bobbin menu bar icon above its thread list popover">
+</p>
 
 Bobbin is a small macOS menu bar client for the useful tasks that do not need to live forever in your main agent history. Open a thread, ask Codex, then get back to what you were doing.
 
@@ -26,6 +27,10 @@ Bobbin is a small macOS menu bar client for the useful tasks that do not need to
 ## Tune every thread to the task
 
 Each thread keeps its own controls:
+
+<p align="center">
+  <img src="docs/images/bobbin-conversation.png" width="392" alt="A Bobbin conversation with thread controls and tool results">
+</p>
 
 | Control | What it changes |
 | --- | --- |
