@@ -162,6 +162,9 @@ public final class HarnessController: ObservableObject {
     public var selectedThread: HarnessThread? { store.selectedThread }
     public var activeThreads: [HarnessThread] { store.activeThreads }
     public var savedThreads: [HarnessThread] { store.savedThreads }
+    /// The list composer is ready for typing in production, but stays
+    /// unfocused in demo mode so captures do not include a text caret.
+    public var shouldAutofocusNewThread: Bool { !isDemoMode }
 
     /// The directory shown in the new-thread composer. Production keeps the
     /// user's home as the default, while a demo session borrows a directory

@@ -15,6 +15,7 @@ final class HarnessControllerTests: XCTestCase {
         let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
 
         XCTAssertFalse(controller.isDemoMode)
+        XCTAssertTrue(controller.shouldAutofocusNewThread)
         XCTAssertEqual(controller.newThreadWorkingDirectory, home)
         controller.createThread()
         XCTAssertEqual(controller.store.state.threads.last?.workingDirectory, home)

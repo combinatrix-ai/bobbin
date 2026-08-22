@@ -244,7 +244,7 @@ private struct ThreadListView: View {
             // a fixture directory in demo mode. The chosen folder is
             // view-local and is never persisted as a default.
             workingDirectory = controller.newThreadWorkingDirectory
-            editorFocused = true
+            editorFocused = controller.shouldAutofocusNewThread
         }
     }
 

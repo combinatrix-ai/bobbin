@@ -239,6 +239,7 @@ final class DemoFixtureTests: XCTestCase {
             ["Keep: the naming rules", "Keep: the small details"]
         )
         XCTAssertEqual(controller.newThreadWorkingDirectory, "/demo/orbit")
+        XCTAssertFalse(controller.shouldAutofocusNewThread)
         XCTAssertNotEqual(
             controller.newThreadWorkingDirectory,
             HarnessThread.defaultWorkingDirectory,
