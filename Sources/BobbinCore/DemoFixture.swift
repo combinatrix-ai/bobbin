@@ -141,7 +141,7 @@ public struct DemoFixture: Sendable {
         let assistantMessage = ChatMessage(
             id: UUID(uuidString: "A0000000-0000-4000-8000-000000000102")!,
             role: .assistant,
-            text: "The story now opens with the user outcome, then makes the quiet automation visible. I left the final review running so we can inspect its progress.",
+            text: "The story now opens with the user outcome, then makes the quiet automation visible. I left the final review running so we can inspect its progress. Next, I would trim the setup details, keep the proof close to the claim, and end with one clear invitation to continue.",
             createdAt: now.addingTimeInterval(-2_920)
         )
 
@@ -307,9 +307,35 @@ public struct DemoFixture: Sendable {
             ]
         )
 
+        let namingRules = HarnessThread(
+            id: UUID(uuidString: "A0000000-0000-4000-8000-000000000006")!,
+            codexThreadID: "demo-thread-naming-rules",
+            title: "Keep: the naming rules",
+            workingDirectory: "/demo/harbor",
+            model: "gpt-5.6-terra",
+            reasoningEffort: "high",
+            reviewMode: .autoReview,
+            systemPrompt: systemPrompt,
+            lastConversationAt: now.addingTimeInterval(-11 * 24 * 60 * 60),
+            savedAt: now.addingTimeInterval(-6 * 60 * 60),
+            status: .done,
+            messages: [
+                ChatMessage(
+                    role: .user,
+                    text: "Keep the naming rules clear across the launch notes.",
+                    createdAt: now.addingTimeInterval(-11 * 24 * 60 * 60 - 90)
+                ),
+                ChatMessage(
+                    role: .assistant,
+                    text: "Use plain nouns, keep the verbs active, and let each label say what happens next.",
+                    createdAt: now.addingTimeInterval(-11 * 24 * 60 * 60)
+                )
+            ]
+        )
+
         return DemoFixture(
             state: PersistedState(
-                threads: [showcase, quietEdges, onboarding, later, saved],
+                threads: [showcase, quietEdges, onboarding, later, saved, namingRules],
                 selectedThreadID: showcaseID,
                 defaultModel: "gpt-5.6-luna",
                 defaultReasoningEffort: "xhigh",

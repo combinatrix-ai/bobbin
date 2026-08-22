@@ -183,8 +183,21 @@ private struct ThreadListView: View {
 
     @State private var showingServerDetail = false
     @State private var draft = ""
-    @State private var workingDirectory = HarnessThread.defaultWorkingDirectory
+    @State private var workingDirectory: String
     @FocusState private var editorFocused: Bool
+
+    init(
+        controller: HarnessController,
+        store: ThreadStore,
+        open: @escaping (UUID) -> Void,
+        openSystemPrompt: @escaping () -> Void
+    ) {
+        self.controller = controller
+        self.store = store
+        self.open = open
+        self.openSystemPrompt = openSystemPrompt
+        _workingDirectory = State(initialValue: controller.newThreadWorkingDirectory)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -227,9 +240,10 @@ private struct ThreadListView: View {
             .scrollIndicators(.automatic)
         }
         .onAppear {
-            // A list visit always starts from the current home directory. The
-            // chosen folder is view-local and is never persisted as a default.
-            workingDirectory = HarnessThread.defaultWorkingDirectory
+            // A list visit starts from the user's home in production or from
+            // a fixture directory in demo mode. The chosen folder is
+            // view-local and is never persisted as a default.
+            workingDirectory = controller.newThreadWorkingDirectory
             editorFocused = true
         }
     }

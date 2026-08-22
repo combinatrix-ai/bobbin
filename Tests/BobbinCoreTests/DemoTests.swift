@@ -162,7 +162,8 @@ final class DemoFixtureTests: XCTestCase {
     }
 
     func testBuiltInFixtureCoversScreenshotStatesAndRoundTrips() throws {
-        let fixture = DemoFixture.builtIn(now: Date(timeIntervalSince1970: 2_000_000))
+        let anchor = Date(timeIntervalSince1970: 2_000_000)
+        let fixture = DemoFixture.builtIn(now: anchor)
         let decoded = try PersistedStateCoding.decoder().decode(
             PersistedState.self,
             from: fixture.encodedState()
@@ -186,6 +187,37 @@ final class DemoFixtureTests: XCTestCase {
         let failed = try XCTUnwrap(showcaseCalls.first(where: { $0.status == .failed }))
         XCTAssertEqual(failed.exitCode, 2)
         XCTAssertEqual(fixture.toolOutputs["demo-command"], "Build complete.\nTests: 18 passed\nElapsed: 1.84s")
+
+        let showcase = try XCTUnwrap(
+            fixture.state.threads.first(where: { $0.title == "Tighten the launch story" })
+        )
+        XCTAssertEqual(showcase.messages.count, 2, "The showcase stays one user/assistant exchange")
+        XCTAssertGreaterThan(
+            showcase.messages.last?.text.count ?? 0,
+            200,
+            "The assistant copy should fill about five narrow-popover lines"
+        )
+
+        XCTAssertEqual(
+            fixture.state.threads.filter(\.isSaved).map(\.title),
+            ["Keep: the small details", "Keep: the naming rules"]
+        )
+        let namingRules = try XCTUnwrap(
+            fixture.state.threads.first(where: { $0.title == "Keep: the naming rules" })
+        )
+        XCTAssertEqual(namingRules.workingDirectory, "/demo/harbor")
+        XCTAssertEqual(namingRules.model, "gpt-5.6-terra")
+        XCTAssertEqual(namingRules.reasoningEffort, "high")
+        XCTAssertEqual(namingRules.reviewMode, .autoReview)
+        XCTAssertEqual(
+            namingRules.lastConversationAt,
+            anchor.addingTimeInterval(-11 * 24 * 60 * 60)
+        )
+        XCTAssertEqual(
+            namingRules.savedAt,
+            anchor.addingTimeInterval(-6 * 60 * 60)
+        )
+        XCTAssertEqual(namingRules.messages.count, 2)
     }
 
     @MainActor
@@ -201,7 +233,17 @@ final class DemoFixtureTests: XCTestCase {
         XCTAssertTrue(controller.authState.isAuthenticated)
         XCTAssertTrue(controller.modelVerified)
         XCTAssertEqual(controller.activeThreads.count, 4)
-        XCTAssertEqual(controller.savedThreads.count, 1)
+        XCTAssertEqual(controller.savedThreads.count, 2)
+        XCTAssertEqual(
+            controller.savedThreads.map(\.title),
+            ["Keep: the naming rules", "Keep: the small details"]
+        )
+        XCTAssertEqual(controller.newThreadWorkingDirectory, "/demo/orbit")
+        XCTAssertNotEqual(
+            controller.newThreadWorkingDirectory,
+            HarnessThread.defaultWorkingDirectory,
+            "Demo composer must not reveal the user's home"
+        )
         XCTAssertEqual(controller.toolOutput(for: "demo-command"), fixture.toolOutputs["demo-command"])
         XCTAssertTrue(
             controller.activeThreads
@@ -213,6 +255,36 @@ final class DemoFixtureTests: XCTestCase {
         // production client/app-server path.
         controller.boot()
         XCTAssertEqual(controller.serverState, .ready)
+        XCTAssertTrue(controller.store.paths.isDemoRoot)
+        XCTAssertTrue(
+            controller.store.paths.root.standardizedFileURL.path.hasPrefix(
+                FileManager.default.temporaryDirectory.standardizedFileURL.path
+            )
+        )
+
+        controller.createThread()
+        XCTAssertEqual(controller.store.state.threads.last?.workingDirectory, "/demo/orbit")
+    }
+
+    @MainActor
+    func testDemoDataComposerDirectoryUsesSelectedFixtureThread() throws {
+        let paths = try HarnessPaths.demo()
+        defer { paths.removeDemoRoot() }
+
+        let thread = HarnessThread(
+            title: "Imported screenshot thread",
+            workingDirectory: "/demo/import",
+            lastConversationAt: Date(timeIntervalSince1970: 2_000_000)
+        )
+        let fixture = DemoFixture(
+            state: PersistedState(threads: [thread], selectedThreadID: thread.id)
+        )
+        try fixture.install(to: paths)
+
+        let controller = try HarnessController(demoPaths: paths, fixture: fixture)
+        XCTAssertEqual(controller.newThreadWorkingDirectory, "/demo/import")
+        controller.createThread(workingDirectory: nil)
+        XCTAssertEqual(controller.store.state.threads.last?.workingDirectory, "/demo/import")
     }
 
     @MainActor

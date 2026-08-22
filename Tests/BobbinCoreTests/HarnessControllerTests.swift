@@ -4,6 +4,22 @@ import XCTest
 
 @MainActor
 final class HarnessControllerTests: XCTestCase {
+    func testProductionControllerKeepsHomeAsComposerDefault() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let controller = try HarnessController(
+            testPaths: fixture.paths,
+            appServerClient: RecordingAppServerClient()
+        )
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path
+
+        XCTAssertFalse(controller.isDemoMode)
+        XCTAssertEqual(controller.newThreadWorkingDirectory, home)
+        controller.createThread()
+        XCTAssertEqual(controller.store.state.threads.last?.workingDirectory, home)
+    }
+
     func testCreateThreadAndSendCreatesOneThreadInChosenDirectoryAndStartsTurn() async throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

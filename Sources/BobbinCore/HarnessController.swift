@@ -162,6 +162,25 @@ public final class HarnessController: ObservableObject {
     public var selectedThread: HarnessThread? { store.selectedThread }
     public var activeThreads: [HarnessThread] { store.activeThreads }
     public var savedThreads: [HarnessThread] { store.savedThreads }
+
+    /// The directory shown in the new-thread composer. Production keeps the
+    /// user's home as the default, while a demo session borrows a directory
+    /// from its fixture so the composer never reveals the real home path.
+    public var newThreadWorkingDirectory: String {
+        guard isDemoMode else { return HarnessThread.defaultWorkingDirectory }
+
+        let fixtureThread = store.selectedThread
+            ?? store.activeThreads.first
+            ?? store.savedThreads.first
+        if let directory = fixtureThread?.workingDirectory
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+            !directory.isEmpty
+        {
+            return directory
+        }
+        return "/demo"
+    }
+
     public func isRewriting(_ localThreadID: UUID) -> Bool {
         rewritingThreadIDs.contains(localThreadID)
     }
@@ -221,8 +240,15 @@ public final class HarnessController: ObservableObject {
         return requested
     }
 
+    private func resolvedNewThreadWorkingDirectory(_ requested: String?) -> String {
+        guard let requested, !requested.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return newThreadWorkingDirectory
+        }
+        return requested
+    }
+
     public func createThread(workingDirectory: String? = nil) {
-        let cwd = Self.resolvedWorkingDirectory(workingDirectory)
+        let cwd = resolvedNewThreadWorkingDirectory(workingDirectory)
         do {
             _ = try store.createThread(workingDirectory: cwd)
             objectWillChange.send()
@@ -243,7 +269,7 @@ public final class HarnessController: ObservableObject {
             return nil
         }
 
-        let cwd = Self.resolvedWorkingDirectory(workingDirectory)
+        let cwd = resolvedNewThreadWorkingDirectory(workingDirectory)
         do {
             let thread = try store.createThread(workingDirectory: cwd)
             objectWillChange.send()
