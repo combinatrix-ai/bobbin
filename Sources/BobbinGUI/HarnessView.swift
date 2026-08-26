@@ -260,10 +260,11 @@ private struct ThreadListView: View {
     private var newThreadField: some View {
         ComposerSurface {
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("New thread…", text: $draft, axis: .vertical)
+                TextField("Ask anything…", text: $draft, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .lineLimit(1...3)
+                    .frame(minHeight: 30, alignment: .center)
                     .focused($editorFocused)
                     .onKeyPress(.return, phases: .down) { keyPress in
                         guard !keyPress.modifiers.contains(.shift) else {
