@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bobbin: five polish proposals</title>
+<style>
+  :root {
+    --page:#f4f1e8; --chrome:#f5f5f2; --field:#fff; --ink:#252820; --muted:#6f736d;
+    --muted-2:#8b8e88; --hairline:rgba(37,40,32,.09); --hairline-2:rgba(37,40,32,.16);
+    --accent:#a8c247; --hot:#c0603f; --radius:13px;
+    --hover:rgba(37,40,32,.05);
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:48px 28px 96px; background:var(--page); color:var(--ink);
+         font:13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { max-width:1180px; margin:0 auto; }
+  header { max-width:66ch; margin-bottom:40px; }
+  h1 { margin:0 0 10px; font-size:21px; font-weight:600; letter-spacing:-.01em; }
+  header p { margin:0 0 6px; color:var(--muted); }
+  .facts { margin:18px 0 0; padding:0; list-style:none; display:flex; flex-wrap:wrap;
+           gap:6px 18px; font-size:11.5px; color:var(--muted); }
+  .facts li::before { content:"· "; color:var(--muted-2); }
+  code { font:11px ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--ink); }
+
+  .variant { padding-top:30px; margin-top:30px; border-top:1px solid var(--hairline-2); }
+  .v-head { max-width:66ch; margin-bottom:18px; }
+  .v-num { font:600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--muted-2); letter-spacing:.06em; }
+  .v-head h2 { margin:4px 0 6px; font-size:15px; font-weight:600; letter-spacing:-.005em; }
+  .tradeoff { margin:0 0 6px; color:var(--muted); font-size:12.5px; }
+  .tradeoff b { color:var(--ink); font-weight:600; }
+  .rec { display:inline-block; margin-top:6px; font-size:10.5px; color:var(--muted);
+         border:1px solid var(--hairline-2); border-radius:999px; padding:1px 8px; }
+  .rec b { color:var(--ink); }
+
+  .states { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 392px));
+            gap:16px 22px; justify-content:start; }
+  figure { margin:0; min-width:0; }
+  figcaption { font-size:10px; letter-spacing:.05em; text-transform:uppercase;
+               color:var(--muted-2); margin-bottom:6px; }
+  .try { color:var(--accent); text-transform:none; letter-spacing:0; font-weight:600; }
+
+  /* ---------- popover frame ---------- */
+  .pop { width:392px; max-width:100%; background:var(--chrome);
+         border:1px solid var(--hairline-2); border-radius:10px; overflow:hidden;
+         position:relative; }
+  .pop.strip { border-radius:8px; }
+
+  .ic { width:12px; height:12px; flex:none; }
+  .ic.s { width:11px; height:11px; }
+
+  .composer-slot { padding:8px 10px 6px; }
+  .line { display:flex; align-items:flex-end; gap:8px; }
+  .field { background:var(--field); border:1px solid var(--hairline); border-radius:var(--radius);
+           flex:1 1 auto; display:flex; align-items:flex-end; gap:8px; padding:5px 5px 5px 11px; }
+  .stack { flex:1 1 auto; min-width:0; padding:4px 0 3px; display:grid; gap:6px; }
+  .text { font-size:12px; line-height:16px; }
+  .text.ph { color:var(--muted-2); }
+  .folder { display:inline-flex; align-items:center; gap:4px; font-size:10.5px; color:var(--muted);
+            white-space:nowrap; }
+  .send { flex:none; display:grid; place-items:center; width:30px; height:30px;
+          border-radius:50%; background:var(--ink); color:var(--chrome); opacity:.3; }
+
+  .meta { display:flex; align-items:center; gap:7px; height:24px; padding:0 13px; }
+  .meta .spacer { flex:1 1 auto; }
+  .gear, .power { flex:none; display:grid; place-items:center; width:24px; height:24px;
+                  border-radius:6px; color:var(--muted); }
+  .foot { display:flex; align-items:center; gap:5px; height:28px; padding:0 6px 0 12px;
+          border-top:1px solid var(--hairline); background:rgba(37,40,32,.025); }
+  .foot .spacer { flex:1 1 auto; }
+  .meter { display:inline-block; height:4px; width:44px; border-radius:999px;
+           background:rgba(37,40,32,.12); overflow:hidden; flex:none; }
+  .meter .fill { display:block; height:100%; width:46%; background:var(--accent); border-radius:999px; }
+  .usage { font:10px ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--muted); }
+
+  /* ---------- thread rows ---------- */
+  .rows { padding:4px 8px 10px; display:grid; gap:1px; }
+  .trow { display:flex; align-items:center; gap:0; padding:0; border-radius:8px;
+          font-size:11.5px; color:var(--ink); position:relative; }
+  .trow .main { flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:7px;
+                padding:8px 0 8px 8px; }
+  .trow .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); flex:none; }
+  .trow .t { flex:1 1 auto; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+             font-weight:500; font-size:12px; }
+  .trow .when { font-size:10px; color:var(--muted-2); flex:none;
+                font-variant-numeric:tabular-nums; }
+  .trow .star { flex:none; display:grid; place-items:center; width:25px; height:25px;
+                color:var(--muted); }
+  .trow .star.saved { color:var(--accent); }
+  .trow.dim { opacity:.55; }
+
+  /* current behaviour: star always there, no hover feedback */
+  .rows.now .trow .star { opacity:1; }
+
+  /* proposed behaviour: hover highlight + star appears on hover */
+  .rows.prop .trow:hover { background:var(--hover); }
+  .rows.prop .trow .star { opacity:0; transition:opacity .12s; }
+  .rows.prop .trow:hover .star, .rows.prop .trow .star.saved { opacity:1; }
+
+  /* context menu */
+  .ctx { position:absolute; z-index:3; top:34px; right:24px; min-width:150px;
+         background:var(--field); border:1px solid var(--hairline-2); border-radius:8px;
+         padding:4px; box-shadow:0 8px 24px rgba(37,40,32,.16); font-size:12px; }
+  .ctx .mi { padding:4px 9px; border-radius:5px; }
+  .ctx .mi.sel { background:var(--ink); color:var(--chrome); }
+  .ctx .mi.danger { color:var(--hot); }
+  .ctx hr { border:0; border-top:1px solid var(--hairline); margin:4px 6px; }
+
+  .sect { display:flex; align-items:center; gap:6px; padding:9px 8px 4px;
+          font-size:10px; font-weight:600; letter-spacing:.02em; color:var(--muted-2); }
+
+  /* ---------- conversation header ---------- */
+  .convo-head { display:flex; align-items:center; gap:5px; height:38px; padding:0 7px; }
+  .back { display:grid; place-items:center; width:28px; height:28px; color:var(--ink); }
+  .title { font-size:12.5px; font-weight:600; flex:1 1 auto; overflow:hidden;
+           text-overflow:ellipsis; white-space:nowrap; }
+  .hstar { display:grid; place-items:center; width:28px; height:28px; color:var(--muted); }
+
+  .opt { font:9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--muted-2);
+         height:24px; display:inline-flex; align-items:center; padding:0 5px; }
+  .dotsep { font:9.5px ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--muted-2); opacity:.7; }
+
+  /* proposed: quiet chip on hover, chevron fades in */
+  .opt.chip { border-radius:5px; gap:3px; transition:background .12s, color .12s; }
+  .opt.chip .chev { width:6px; height:6px; opacity:0; transition:opacity .12s;
+                    border-right:1.4px solid currentColor; border-bottom:1.4px solid currentColor;
+                    transform:rotate(45deg) translateY(-1px); }
+  .opt.chip:hover { background:var(--hover); color:var(--muted); }
+  .opt.chip:hover .chev { opacity:.9; }
+  .folder.chip { border-radius:5px; height:22px; padding:0 6px; margin-left:-6px;
+                 transition:background .12s; }
+  .folder.chip:hover { background:var(--hover); }
+
+  /* ---------- transcript ---------- */
+  .msgs { padding:10px 14px 14px; display:grid; gap:12px; }
+  .bubble-wrap { display:grid; justify-items:end; gap:2px; }
+  .bubble { max-width:85%; background:var(--field); border-radius:12px; padding:8px;
+            font-size:12.5px; line-height:1.45; }
+  .assist { font-size:12.5px; line-height:1.45; }
+  .rw { display:flex; gap:2px; justify-content:flex-end; }
+  .rwbtn { display:grid; place-items:center; width:18px; height:16px; color:var(--muted); }
+
+  .bubble-wrap.now .rwbtn { opacity:.48; }
+  .bubble-wrap.prop .rwbtn { opacity:0; transition:opacity .15s; }
+  .bubble-wrap.prop:hover .rwbtn { opacity:.9; }
+
+  .callout { margin-top:10px; font-size:10.5px; color:var(--muted);
+             display:flex; align-items:center; gap:6px; }
+
+  @media (prefers-color-scheme: dark) {
+    :root { --page:#171914; --chrome:#22241d; --field:#2b2e26; --ink:#f2f0e8;
+            --muted:#a9ad9f; --muted-2:#83877c; --hairline:rgba(242,240,232,.11);
+            --hairline-2:rgba(242,240,232,.2); --accent:#b8d453; --hot:#d97a56;
+            --hover:rgba(242,240,232,.07); }
+    .foot { background:rgba(242,240,232,.03); }
+    .meter { background:rgba(242,240,232,.14); }
+    .ctx { box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-gear" viewBox="0 0 16 16"><path fill="currentColor" d="M8 5.2A2.8 2.8 0 1 0 8 10.8 2.8 2.8 0 0 0 8 5.2m0 1.4a1.4 1.4 0 1 1 0 2.8 1.4 1.4 0 0 1 0-2.8"/><path fill="currentColor" d="M7.2 1h1.6l.25 1.5.9.37 1.25-.85 1.13 1.13-.85 1.25.37.9L13.4 6.2v1.6l-1.5.25-.37.9.85 1.25-1.13 1.13-1.25-.85-.9.37L8.8 12.4H7.2l-.25-1.5-.9-.37-1.25.85-1.13-1.13.85-1.25-.37-.9L2.6 7.8V6.2l1.5-.25.37-.9-.85-1.25 1.13-1.13 1.25.85.9-.37z" opacity=".55"/></symbol>
+  <symbol id="i-power" viewBox="0 0 16 16"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 2v5.2"/><path d="M4.9 4.3a4.6 4.6 0 1 0 6.2 0"/></g></symbol>
+  <symbol id="i-folder" viewBox="0 0 16 16"><path fill="currentColor" d="M1.5 3.5A1.5 1.5 0 0 1 3 2h3l1.5 1.75H13A1.5 1.5 0 0 1 14.5 5.25v6.25A1.5 1.5 0 0 1 13 13H3a1.5 1.5 0 0 1-1.5-1.5z"/></symbol>
+  <symbol id="i-send" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="2.2" d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></symbol>
+  <symbol id="i-back" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="m9.5 3.5-4 4.5 4 4.5"/></symbol>
+  <symbol id="i-star" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.2" d="m8 2.2 1.72 3.72 4.08.44-3.04 2.75.84 4.01L8 11.1l-3.6 2.02.84-4.01L2.2 6.36l4.08-.44z"/></symbol>
+  <symbol id="i-star-f" viewBox="0 0 16 16"><path fill="currentColor" d="m8 2.2 1.72 3.72 4.08.44-3.04 2.75.84 4.01L8 11.1l-3.6 2.02.84-4.01L2.2 6.36l4.08-.44z"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 16 16"><path fill="currentColor" d="M11.3 2.2a1.6 1.6 0 0 1 2.26 2.26l-7.6 7.6-3.06.8.8-3.06z"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 16 16"><path fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" d="M13 8a5 5 0 1 1-1.5-3.57M13 2.8v2.4h-2.4"/></symbol>
+</svg>
+
+<div class="wrap">
+
+<header>
+  <h1>Five polish proposals</h1>
+  <p>The places where the popover still reads as unfinished, drawn at its real 392pt width. P1 folds in the two open mockups (<code>settings-placement</code>, <code>footer-usage</code>); P2–P5 are new. The hover-dependent mocks are live — move the pointer over them.</p>
+  <ul class="facts">
+    <li>Popover 392×560</li>
+    <li>P2 and P4 are pure additions, no layout change</li>
+    <li>P1 decides the two pending mockups</li>
+  </ul>
+</header>
+
+<!-- ============ P1 ============ -->
+<section class="variant">
+  <div class="v-head">
+    <div class="v-num">P1</div>
+    <h2>Landing chrome: settle the gear row</h2>
+    <p class="tradeoff">The open question from <code>settings-placement.html</code>. Two coherent directions survive: <b>(a)</b> the folder moves out of the composer onto the 24pt line, so the landing view and the conversation share one meta-line grammar — folder left, controls right. <b>(b)</b> the row disappears and a 28pt footer takes gear + power + the usage meter from <code>footer-usage.html</code> variant 3.</p>
+    <span class="rec">Recommend <b>(a)</b> — no new chrome, and the two views finally rhyme. Pick (b) only if the usage meter is wanted now.</span>
+  </div>
+  <div class="states">
+    <figure>
+      <figcaption>Now · a row for one button</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="line"><div class="field">
+            <div class="stack">
+              <div class="text ph">New thread…</div>
+              <div class="folder"><svg class="ic s"><use href="#i-folder"/></svg>tiny-harness-gui</div>
+            </div>
+            <div class="send"><svg class="ic s"><use href="#i-send"/></svg></div>
+          </div></div>
+        </div>
+        <div class="meta"><div class="spacer"></div><div class="gear"><svg class="ic"><use href="#i-gear"/></svg></div></div>
+        <div class="rows now">
+          <div class="trow"><div class="main"><span class="dot"></span><span class="t">Fix the popover header spacing</span><span class="when">Running</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+          <div class="trow"><div class="main"><span class="t">Add message editing</span><span class="when">2h ago</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption>(a) meta line — folder left, gear right</figcaption>
+      <div class="pop">
+        <div class="composer-slot">
+          <div class="line"><div class="field">
+            <div class="stack"><div class="text ph">New thread…</div></div>
+            <div class="send"><svg class="ic s"><use href="#i-send"/></svg></div>
+          </div></div>
+        </div>
+        <div class="meta">
+          <div class="folder"><svg class="ic s"><use href="#i-folder"/></svg>tiny-harness-gui</div>
+          <div class="spacer"></div>
+          <div class="gear"><svg class="ic"><use href="#i-gear"/></svg></div>
+        </div>
+        <div class="rows now">
+          <div class="trow"><div class="main"><span class="dot"></span><span class="t">Fix the popover header spacing</span><span class="when">Running</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+          <div class="trow"><div class="main"><span class="t">Add message editing</span><span class="when">2h ago</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption>(b) footer — gear, power, usage meter</figcaption>
+      <div class="pop">
+        <div class="composer-slot" style="padding-bottom:6px">
+          <div class="line"><div class="field">
+            <div class="stack">
+              <div class="text ph">New thread…</div>
+              <div class="folder"><svg class="ic s"><use href="#i-folder"/></svg>tiny-harness-gui</div>
+            </div>
+            <div class="send"><svg class="ic s"><use href="#i-send"/></svg></div>
+          </div></div>
+        </div>
+        <div class="rows now" style="padding-bottom:6px">
+          <div class="trow"><div class="main"><span class="dot"></span><span class="t">Fix the popover header spacing</span><span class="when">Running</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+          <div class="trow"><div class="main"><span class="t">Add message editing</span><span class="when">2h ago</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+        </div>
+        <div class="foot">
+          <span class="meter"><span class="fill"></span></span><span class="usage">46%</span>
+          <div class="spacer"></div>
+          <div class="gear"><svg class="ic"><use href="#i-gear"/></svg></div>
+          <div class="power"><svg class="ic"><use href="#i-power"/></svg></div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ P2 ============ -->
+<section class="variant">
+  <div class="v-head">
+    <div class="v-num">P2</div>
+    <h2>Thread rows: hover feedback, quieter stars, and a way to delete</h2>
+    <p class="tradeoff">Today every row shows a hollow star at all times — six outlined stars of noise for an action used once per thread — and rows give <b>no hover feedback</b>, so the list feels inert. Worse, there is <b>no way to delete a thread</b>; the only exit is waiting seven days. Proposed: rows highlight on hover, the star appears on hover only (saved rows keep the filled star as their badge), and right-click opens a small menu with <b>Save and keep</b> / <b>Delete now</b>. Delete needs no confirm — the whole product premise is that threads are disposable.</p>
+    <span class="rec">Pure addition · fixes a real gap (delete) while removing noise</span>
+  </div>
+  <div class="states">
+    <figure>
+      <figcaption>Now · six standing stars, inert rows</figcaption>
+      <div class="pop strip">
+        <div class="rows now" style="padding-top:8px">
+          <div class="trow"><div class="main"><span class="dot"></span><span class="t">Fix the popover header spacing</span><span class="when">Running</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+          <div class="trow"><div class="main"><span class="t">Add message editing</span><span class="when">2h ago</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+          <div class="trow"><div class="main"><span class="t">Bundle id rename</span><span class="when">1d ago</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+          <div class="trow dim"><div class="main"><span class="t">A note for later</span><span class="when">2d left</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+          <div class="sect">SAVED</div>
+          <div class="trow"><div class="main"><span class="t">Keep: the small details</span></div><span class="star saved"><svg class="ic s"><use href="#i-star-f"/></svg></span></div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption><span class="try">live</span> · proposed — hover a row</figcaption>
+      <div class="pop strip">
+        <div class="rows prop" style="padding-top:8px">
+          <div class="trow"><div class="main"><span class="dot"></span><span class="t">Fix the popover header spacing</span><span class="when">Running</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+          <div class="trow"><div class="main"><span class="t">Add message editing</span><span class="when">2h ago</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+          <div class="trow"><div class="main"><span class="t">Bundle id rename</span><span class="when">1d ago</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+          <div class="trow dim"><div class="main"><span class="t">A note for later</span><span class="when">2d left</span></div><span class="star"><svg class="ic s"><use href="#i-star"/></svg></span></div>
+          <div class="sect">SAVED</div>
+          <div class="trow"><div class="main"><span class="t">Keep: the small details</span><span class="when">3d ago</span></div><span class="star saved"><svg class="ic s"><use href="#i-star-f"/></svg></span></div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption>Proposed · right-click menu</figcaption>
+      <div class="pop strip" style="min-height:170px">
+        <div class="rows now" style="padding-top:8px">
+          <div class="trow" style="background:var(--hover)"><div class="main"><span class="t">Add message editing</span><span class="when">2h ago</span></div></div>
+          <div class="trow"><div class="main"><span class="t">Bundle id rename</span><span class="when">1d ago</span></div></div>
+          <div class="trow dim"><div class="main"><span class="t">A note for later</span><span class="when">2d left</span></div></div>
+        </div>
+        <div class="ctx">
+          <div class="mi sel">Save and keep</div>
+          <hr>
+          <div class="mi danger">Delete now</div>
+        </div>
+      </div>
+      <div class="callout">Running threads swap “Delete now” for “Stop, then delete”.</div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ P3 ============ -->
+<section class="variant">
+  <div class="v-head">
+    <div class="v-num">P3</div>
+    <h2>Conversation controls: make the menus feel clickable</h2>
+    <p class="tradeoff">“Auto review · luna · xhigh” and the folder are all menus/buttons, but they render as 9.5px tertiary mono text — identical to the read-only metadata style the README screenshots use. Nothing invites a click, so the app’s best feature (per-thread tuning) hides in plain sight. Proposed: the resting look stays exactly as quiet, but on hover each item gets the standard chip background and a small chevron. No layout shift — the chip paints inside the existing 24pt line.</p>
+    <span class="rec">Zero cost at rest · discoverability only appears under the pointer</span>
+  </div>
+  <div class="states">
+    <figure>
+      <figcaption>Now · static text that happens to be a menu</figcaption>
+      <div class="pop strip">
+        <div class="convo-head">
+          <span class="back"><svg class="ic"><use href="#i-back"/></svg></span>
+          <span class="title">Tighten the launch story</span>
+          <span class="hstar"><svg class="ic s"><use href="#i-star"/></svg></span>
+        </div>
+        <div class="meta" style="height:24px;padding-bottom:4px">
+          <div class="folder"><svg class="ic s"><use href="#i-folder"/></svg>orbit</div>
+          <div class="spacer"></div>
+          <span class="opt">Auto review</span><span class="dotsep">·</span>
+          <span class="opt">luna</span><span class="dotsep">·</span>
+          <span class="opt">xhigh</span>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption><span class="try">live</span> · proposed — hover the items</figcaption>
+      <div class="pop strip">
+        <div class="convo-head">
+          <span class="back"><svg class="ic"><use href="#i-back"/></svg></span>
+          <span class="title">Tighten the launch story</span>
+          <span class="hstar"><svg class="ic s"><use href="#i-star"/></svg></span>
+        </div>
+        <div class="meta" style="height:24px;padding-bottom:4px">
+          <div class="folder chip"><svg class="ic s"><use href="#i-folder"/></svg>orbit</div>
+          <div class="spacer"></div>
+          <span class="opt chip">Auto review<span class="chev"></span></span><span class="dotsep">·</span>
+          <span class="opt chip">luna<span class="chev"></span></span><span class="dotsep">·</span>
+          <span class="opt chip">xhigh<span class="chev"></span></span>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ P4 ============ -->
+<section class="variant">
+  <div class="v-head">
+    <div class="v-num">P4</div>
+    <h2>Transcript: edit/regenerate icons rest at zero</h2>
+    <p class="tradeoff">The pencil under every user bubble and the redo arrow under every reply currently idle at 48% opacity — the transcript carries a faint grey barnacle per message. Proposed: rest at 0, fade in on bubble hover (keyboard focus still reveals them, so accessibility is unchanged). The transcript becomes pure conversation until the pointer asks for tools.</p>
+    <span class="rec">One-line change · <code>opacity 0.48 → 0</code> at rest</span>
+  </div>
+  <div class="states">
+    <figure>
+      <figcaption>Now · standing icons</figcaption>
+      <div class="pop strip">
+        <div class="msgs">
+          <div class="bubble-wrap now">
+            <div class="bubble">Can you tighten the launch story and show me what changed?</div>
+            <div class="rw"><span class="rwbtn"><svg class="ic s"><use href="#i-pencil"/></svg></span></div>
+          </div>
+          <div class="bubble-wrap now" style="justify-items:start">
+            <div class="assist">The story now opens with the user outcome, then makes the quiet automation visible.</div>
+            <div class="rw"><span class="rwbtn"><svg class="ic s"><use href="#i-redo"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+    </figure>
+    <figure>
+      <figcaption><span class="try">live</span> · proposed — hover a message</figcaption>
+      <div class="pop strip">
+        <div class="msgs">
+          <div class="bubble-wrap prop">
+            <div class="bubble">Can you tighten the launch story and show me what changed?</div>
+            <div class="rw"><span class="rwbtn"><svg class="ic s"><use href="#i-pencil"/></svg></span></div>
+          </div>
+          <div class="bubble-wrap prop" style="justify-items:start">
+            <div class="assist">The story now opens with the user outcome, then makes the quiet automation visible.</div>
+            <div class="rw"><span class="rwbtn"><svg class="ic s"><use href="#i-redo"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ P5 ============ -->
+<section class="variant">
+  <div class="v-head">
+    <div class="v-num">P5</div>
+    <h2>Small consistencies</h2>
+    <p class="tradeoff">Three one-liners that only show up as “something feels off”:</p>
+    <ul class="facts" style="display:block; margin-top:8px">
+      <li style="margin-bottom:6px"><b>Saved rows lose their timestamp.</b> Metadata is hidden the moment a thread is saved, so the Saved section is the only place with a bare right edge. Show the same “3d ago” — the star already marks the state. (Drawn in P2’s proposed list.)</li>
+      <li style="margin-bottom:6px"><b>Selected-row tint only exists in the Saved section.</b> <code>isSelected</code> is hard-coded false for active threads, true only for saved ones — so returning from a conversation highlights a saved row but never an active one. Either pass the real selection for both or drop it for both; today it reads as a rendering glitch.</li>
+      <li><b>The two composers disagree about the folder.</b> Landing keeps it inside the card, the conversation keeps it on the meta line. P1(a) resolves this for free; if P1(b) wins, move the conversation’s folder into its composer instead so there is still one grammar.</li>
+    </ul>
+  </div>
+</section>
+
+</div>
+</body>
+</html>
