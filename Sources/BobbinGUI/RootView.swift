@@ -14,27 +14,31 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            switch controller.serverState {
-            case .starting:
-                LoadingView()
-            case .ready:
-                authenticatedContent
-            case .restarting:
-                // A restart is progress, not a failure: the thread surface
-                // stays up and HarnessView shows the quiet inline notice.
-                if controller.authState.isAuthenticated {
-                    HarnessView(controller: controller, store: store, session: session)
-                } else {
+            if controller.authState.isReauthorizationRequired {
+                reauthorizationContent
+            } else {
+                switch controller.serverState {
+                case .starting:
                     LoadingView()
-                }
-            case .stopped:
-                // Once authenticated, keep the thread index visible and
-                // surface the failure as the compact inline banner owned by
-                // HarnessView. A boot-time failure still gets a retry pane.
-                if controller.authState.isAuthenticated {
-                    HarnessView(controller: controller, store: store, session: session)
-                } else {
-                    ServerErrorView(restart: controller.restart)
+                case .ready:
+                    authenticatedContent
+                case .restarting:
+                    // A restart is progress, not a failure: the thread surface
+                    // stays up and HarnessView shows the quiet inline notice.
+                    if controller.authState.isAuthenticated {
+                        HarnessView(controller: controller, store: store, session: session)
+                    } else {
+                        LoadingView()
+                    }
+                case .stopped:
+                    // Once authenticated, keep the thread index visible and
+                    // surface the failure as the compact inline banner owned by
+                    // HarnessView. A boot-time failure still gets a retry pane.
+                    if controller.authState.isAuthenticated {
+                        HarnessView(controller: controller, store: store, session: session)
+                    } else {
+                        ServerErrorView(restart: controller.restart)
+                    }
                 }
             }
         }
@@ -66,6 +70,10 @@ struct RootView: View {
             )
         case .deviceCode(let verificationURL, let userCode, _):
             DeviceAuthView(verificationURL: verificationURL, userCode: userCode)
+        case .reauthorizationRequired:
+            // This state is routed before serverState in `body` so it always
+            // replaces the underlying thread surface with the full auth pane.
+            reauthorizationContent
         case .failed(let message):
             if controller.isDemoMode {
                 AuthErrorView(
@@ -77,6 +85,14 @@ struct RootView: View {
                 AuthErrorView(message: message, retryDeviceAuth: controller.chooseDeviceAuth)
             }
         }
+    }
+
+    private var reauthorizationContent: some View {
+        AuthErrorView(
+            title: "Reauthorization is required",
+            message: "Your Codex session needs to be connected again.",
+            retryDeviceAuth: controller.chooseDeviceAuth
+        )
     }
 }
 

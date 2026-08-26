@@ -70,10 +70,16 @@ public final class HarnessController: ObservableObject {
         case chooseAPIKey(source: String)
         case deviceCode(verificationURL: String, userCode: String, loginID: String)
         case authenticated(AuthenticationMode)
+        case reauthorizationRequired
         case failed(String)
 
         public var isAuthenticated: Bool {
             if case .authenticated = self { return true }
+            return false
+        }
+
+        public var isReauthorizationRequired: Bool {
+            if case .reauthorizationRequired = self { return true }
             return false
         }
     }
@@ -925,8 +931,17 @@ public final class HarnessController: ObservableObject {
             await cleanupExpiredThreads(using: client)
             try await resolveAuthentication(using: client)
         } catch {
-            serverState = .stopped(error.localizedDescription)
-            authState = .failed(error.localizedDescription)
+            let requiresReauthorization = (error as? HarnessError)?.isReauthorizationRequired == true
+            if requiresReauthorization {
+                // The app-server can be healthy enough to continue serving
+                // requests even though the account session needs a new login.
+                // Keep it ready so RootView can present the auth gate instead
+                // of misreporting the server as stopped.
+                serverState = .ready
+            } else {
+                serverState = .stopped(error.localizedDescription)
+                authState = .failed(error.localizedDescription)
+            }
             report(error)
         }
     }
@@ -1199,6 +1214,8 @@ public final class HarnessController: ObservableObject {
         case "account/updated":
             if let mode = params["authMode"] as? String {
                 authState = .authenticated(mode == "apikey" ? .apiKey : .deviceAuth)
+            } else if params["authMode"] is NSNull {
+                authState = .reauthorizationRequired
             }
 
         case "item/agentMessage/delta":
@@ -1467,6 +1484,9 @@ public final class HarnessController: ObservableObject {
 
     private func report(_ error: Error) {
         lastError = error.localizedDescription
+        if (error as? HarnessError)?.isReauthorizationRequired == true {
+            authState = .reauthorizationRequired
+        }
     }
 
     private static func title(from prompt: String) -> String {

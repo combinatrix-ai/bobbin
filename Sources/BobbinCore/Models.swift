@@ -398,6 +398,17 @@ public enum HarnessError: LocalizedError, Equatable {
     case apiKeyUnavailable
     case threadNotFound
 
+    /// Whether this is the app-server's signal that the current account
+    /// session needs to be authorized again. Normalize harmless surrounding
+    /// formatting so the full-pane gate does not depend on presentation.
+    public var isReauthorizationRequired: Bool {
+        guard case .serverError(_, let message) = self else { return false }
+        let surroundingCharacters = CharacterSet.whitespacesAndNewlines
+            .union(.punctuationCharacters)
+        let normalized = message.trimmingCharacters(in: surroundingCharacters)
+        return normalized.caseInsensitiveCompare("Reauthorization is required") == .orderedSame
+    }
+
     public var errorDescription: String? {
         switch self {
         case .codexNotFound:
