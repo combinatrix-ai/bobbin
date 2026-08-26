@@ -112,9 +112,9 @@ private struct ComposerActionButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: isRunning ? "stop.fill" : "arrow.up")
-                .font(.system(size: 11, weight: .bold))
+                .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(foregroundColor)
-                .frame(width: 30, height: 30)
+                .frame(width: 32, height: 32)
                 .background(backgroundColor, in: Circle())
         }
         .buttonStyle(.plain)
@@ -167,7 +167,7 @@ private struct WorkingDirectoryButton: View {
     var body: some View {
         Button(action: action) {
             Label(URL(fileURLWithPath: path).lastPathComponent, systemImage: "folder")
-                .font(.system(size: 10.5))
+                .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .frame(height: 22)
@@ -264,7 +264,7 @@ private struct ThreadListView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 12))
                     .lineLimit(1...3)
-                    .frame(minHeight: 30, alignment: .center)
+                    .frame(minHeight: 32, alignment: .center)
                     .focused($editorFocused)
                     .onKeyPress(.return, phases: .down) { keyPress in
                         guard !keyPress.modifiers.contains(.shift) else {
@@ -387,8 +387,8 @@ private struct SettingsMenu: View {
                 }
             } label: {
                 Image(systemName: "gearshape")
-                    .font(.system(size: 11, weight: .medium))
-                    .frame(width: 24, height: 24)
+                    .font(.system(size: 12, weight: .medium))
+                    .frame(width: 28, height: 28)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
@@ -431,7 +431,7 @@ private struct SystemPromptView: View {
             HStack(spacing: 5) {
                 Button(action: back) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
@@ -639,9 +639,9 @@ private struct ThreadRow: View {
 
             Button(action: save) {
                 Image(systemName: thread.isSaved ? "star.fill" : "star")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(thread.isSaved ? Color.harnessAccent : Color.secondary)
-                    .frame(width: 25, height: 25)
+                    .frame(width: 28, height: 28)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -811,7 +811,7 @@ private struct ConversationView: View {
                     .textFieldStyle(.plain)
                     .font(.system(size: 12.5))
                     .lineLimit(1...maxComposerLines)
-                    .frame(minHeight: 30, alignment: .center)
+                    .frame(minHeight: 32, alignment: .center)
                     .disabled(editingMessageID != nil || controller.isRewriting(thread.id))
 
                 ComposerActionButton(
@@ -956,7 +956,7 @@ private struct ConversationHeader: View {
             HStack(spacing: 5) {
                 Button(action: back) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.system(size: 12, weight: .semibold))
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(.plain)
@@ -971,7 +971,7 @@ private struct ConversationHeader: View {
 
                 Button(action: save) {
                     Image(systemName: thread.isSaved ? "star.fill" : "star")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(thread.isSaved ? Color.harnessAccent : Color.secondary)
                         .frame(width: 28, height: 28)
                 }
@@ -1082,7 +1082,7 @@ private struct ThreadOptionsRow: View {
 
     private var separator: some View {
         Text("·")
-            .font(.system(size: 9.5, design: .monospaced))
+            .font(.system(size: 10.5, design: .monospaced))
             .foregroundStyle(.tertiary)
     }
 
@@ -1094,7 +1094,7 @@ private struct ThreadOptionsRow: View {
                 .frame(width: 6)
                 .opacity(hoveredOption == title ? 0.9 : 0)
         }
-            .font(.system(size: 9.5, design: .monospaced))
+            .font(.system(size: 10.5, design: .monospaced))
             .foregroundStyle(.tertiary)
             .frame(height: 24)
             .contentShape(RoundedRectangle(cornerRadius: 5))
@@ -1470,9 +1470,9 @@ private struct MessageBubble: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemImage)
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 18, height: 16)
+                .frame(width: 24, height: 20)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
