@@ -130,6 +130,45 @@ final class HarnessControllerTests: XCTestCase {
         XCTAssertTrue(client.requests.isEmpty)
     }
 
+    func testDeleteThreadRemovesIdleStopsRunningAndClearsSelection() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let client = RecordingAppServerClient()
+        let controller = try HarnessController(
+            testPaths: fixture.paths,
+            appServerClient: client
+        )
+        let idle = try controller.store.createThread(workingDirectory: "/tmp/idle")
+        let running = try controller.store.createThread(workingDirectory: "/tmp/running")
+        try controller.store.update(running.id) { thread in
+            thread.codexThreadID = "server-thread"
+            thread.activeTurnID = "server-turn"
+            thread.status = .running
+        }
+        controller.selectThread(running.id)
+
+        controller.deleteThread(idle.id)
+        XCTAssertFalse(controller.store.state.threads.contains(where: { $0.id == idle.id }))
+        XCTAssertEqual(controller.store.state.selectedThreadID, running.id)
+
+        controller.deleteThread(running.id)
+        await waitUntil("running thread interrupt is requested") {
+            client.requests.contains(where: { $0.method == "turn/interrupt" })
+        }
+
+        XCTAssertFalse(controller.store.state.threads.contains(where: { $0.id == running.id }))
+        XCTAssertNil(controller.store.state.selectedThreadID)
+        XCTAssertEqual(
+            client.requests.first(where: { $0.method == "turn/interrupt" })?.params?["threadId"] as? String,
+            "server-thread"
+        )
+        XCTAssertEqual(
+            client.requests.first(where: { $0.method == "turn/interrupt" })?.params?["turnId"] as? String,
+            "server-turn"
+        )
+    }
+
     func testReauthorizationServerErrorFromActionPromotesAuthState() async throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

@@ -106,7 +106,7 @@ public final class ThreadStore: ObservableObject {
     public func removeThread(_ id: UUID) throws {
         state.threads.removeAll { $0.id == id }
         if state.selectedThreadID == id {
-            state.selectedThreadID = activeThreads.first?.id ?? savedThreads.first?.id
+            state.selectedThreadID = nil
         }
         try persist()
     }

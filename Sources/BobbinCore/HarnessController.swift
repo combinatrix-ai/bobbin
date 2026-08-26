@@ -380,6 +380,19 @@ public final class HarnessController: ObservableObject {
         }
     }
 
+    public func deleteThread(_ id: UUID) {
+        guard let thread = store.state.threads.first(where: { $0.id == id }) else { return }
+        if thread.status == .running {
+            stopThread(id)
+        }
+        do {
+            try store.removeThread(id)
+            objectWillChange.send()
+        } catch {
+            report(error)
+        }
+    }
+
     public func send(_ text: String, in localThreadID: UUID) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
