@@ -162,16 +162,25 @@ private struct WorkingDirectoryButton: View {
     let path: String
     let action: () -> Void
 
+    @State private var isHovering = false
+
     var body: some View {
         Button(action: action) {
             Label(URL(fileURLWithPath: path).lastPathComponent, systemImage: "folder")
                 .font(.system(size: 10.5))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .frame(height: 22)
+                .background {
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(isHovering ? Color.primary.opacity(0.05) : .clear)
+                        .padding(.horizontal, -6)
+                }
         }
         .buttonStyle(.plain)
         .help(path)
         .accessibilityLabel("Working folder: \(path)")
+        .onHover { isHovering = $0 }
     }
 }
 
@@ -218,18 +227,18 @@ private struct ThreadListView: View {
                         ForEach(store.activeThreads) { thread in
                             ThreadRow(
                                 thread: thread,
-                                isSelected: false,
                                 opacity: controller.opacity(for: thread),
                                 select: { open(thread.id) },
-                                save: { controller.saveThread(thread.id) }
+                                save: { controller.saveThread(thread.id) },
+                                delete: { controller.deleteThread(thread.id) }
                             )
                         }
 
                         if !store.savedThreads.isEmpty {
                             SavedSection(
                                 threads: store.savedThreads,
-                                selectedID: store.state.selectedThreadID,
-                                open: open
+                                open: open,
+                                delete: { controller.deleteThread($0) }
                             )
                         }
                     }
@@ -251,22 +260,18 @@ private struct ThreadListView: View {
     private var newThreadField: some View {
         ComposerSurface {
             HStack(alignment: .bottom, spacing: 8) {
-                VStack(alignment: .leading, spacing: 6) {
-                    TextField("New thread…", text: $draft, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-                        .lineLimit(1...3)
-                        .focused($editorFocused)
-                        .onKeyPress(.return, phases: .down) { keyPress in
-                            guard !keyPress.modifiers.contains(.shift) else {
-                                return .ignored
-                            }
-                            submit()
-                            return .handled
+                TextField("New thread…", text: $draft, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .lineLimit(1...3)
+                    .focused($editorFocused)
+                    .onKeyPress(.return, phases: .down) { keyPress in
+                        guard !keyPress.modifiers.contains(.shift) else {
+                            return .ignored
                         }
-
-                    WorkingDirectoryButton(path: workingDirectory, action: chooseFolder)
-                }
+                        submit()
+                        return .handled
+                    }
 
                 ComposerActionButton(
                     isRunning: false,
@@ -284,7 +289,9 @@ private struct ThreadListView: View {
     }
 
     private var threadHeader: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 7) {
+            WorkingDirectoryButton(path: workingDirectory, action: chooseFolder)
+
             Spacer(minLength: 3)
 
             SettingsMenu(
@@ -557,8 +564,8 @@ private struct EmptyThreadView: View {
 
 private struct SavedSection: View {
     let threads: [HarnessThread]
-    let selectedID: UUID?
     let open: (UUID) -> Void
+    let delete: (UUID) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
@@ -576,10 +583,10 @@ private struct SavedSection: View {
             ForEach(threads) { thread in
                 ThreadRow(
                     thread: thread,
-                    isSelected: selectedID == thread.id,
                     opacity: 1,
                     select: { open(thread.id) },
-                    save: {}
+                    save: {},
+                    delete: { delete(thread.id) }
                 )
             }
         }
@@ -590,10 +597,13 @@ private struct SavedSection: View {
 
 private struct ThreadRow: View {
     let thread: HarnessThread
-    let isSelected: Bool
     let opacity: Double
     let select: () -> Void
     let save: () -> Void
+    let delete: () -> Void
+
+    @State private var isHovering = false
+    @FocusState private var saveFocused: Bool
 
     var body: some View {
         HStack(spacing: 1) {
@@ -612,13 +622,11 @@ private struct ThreadRow: View {
 
                     Spacer(minLength: 3)
 
-                    if !thread.isSaved {
-                        Text(metadata)
-                            .font(.system(size: 10, weight: .regular))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                            .monospacedDigit()
-                    }
+                    Text(metadata)
+                        .font(.system(size: 10, weight: .regular))
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .monospacedDigit()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, 8)
@@ -639,22 +647,38 @@ private struct ThreadRow: View {
             .disabled(thread.isSaved)
             .help(thread.isSaved ? "Saved" : "Save and keep")
             .accessibilityLabel(thread.isSaved ? "Saved" : "Save thread")
+            .focused($saveFocused)
+            .opacity(thread.isSaved || isHovering || saveFocused ? 1 : 0)
+            .animation(.easeInOut(duration: 0.12), value: isHovering)
         }
-        .background(isSelected ? Color(nsColor: .selectedContentBackgroundColor).opacity(0.15) : .clear)
+        .background(
+            isHovering ? Color.primary.opacity(0.05) : .clear,
+            in: RoundedRectangle(cornerRadius: 8)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .opacity(opacity)
+        .onHover { isHovering = $0 }
+        .contextMenu {
+            Button(
+                thread.status == .running ? "Stop and Delete" : "Delete",
+                role: .destructive,
+                action: delete
+            )
+        }
     }
 
     private var accessibilityLabel: String {
-        if thread.isSaved { return "\(thread.title), saved" }
+        if thread.isSaved { return "\(thread.title), saved, \(metadata)" }
         return "\(thread.title), \(metadata)"
     }
 
     private var metadata: String {
         if thread.status == .running { return "Running" }
         let age = max(0, Date().timeIntervalSince(thread.lastConversationAt))
-        let remaining = Int(ceil((7 * 24 * 60 * 60 - age) / (24 * 60 * 60)))
-        if remaining <= 2 { return "\(max(0, remaining))d left" }
+        if !thread.isSaved {
+            let remaining = Int(ceil((7 * 24 * 60 * 60 - age) / (24 * 60 * 60)))
+            if remaining <= 2 { return "\(max(0, remaining))d left" }
+        }
         if age < 60 { return "Just now" }
         if age < 3_600 { return "\(Int(age / 60))m ago" }
         if age < 86_400 { return "\(Int(age / 3_600))h ago" }
@@ -984,6 +1008,8 @@ private struct ThreadOptionsRow: View {
     let selectModel: (String, String) -> Void
     let selectReviewMode: (HarnessReviewMode) -> Void
 
+    @State private var hoveredOption: String?
+
     var body: some View {
         HStack(spacing: 3) {
             Menu {
@@ -1060,11 +1086,29 @@ private struct ThreadOptionsRow: View {
     }
 
     private func optionLabel(_ title: String) -> some View {
-        Text(title)
+        HStack(spacing: 3) {
+            Text(title)
+            Image(systemName: "chevron.down")
+                .font(.system(size: 6, weight: .semibold))
+                .frame(width: 6)
+                .opacity(hoveredOption == title ? 0.9 : 0)
+        }
             .font(.system(size: 9.5, design: .monospaced))
             .foregroundStyle(.tertiary)
             .frame(height: 24)
-            .contentShape(Rectangle())
+            .contentShape(RoundedRectangle(cornerRadius: 5))
+            .background(
+                hoveredOption == title ? Color.primary.opacity(0.05) : .clear,
+                in: RoundedRectangle(cornerRadius: 5)
+            )
+            .animation(.easeInOut(duration: 0.12), value: hoveredOption == title)
+            .onHover { isHovering in
+                if isHovering {
+                    hoveredOption = title
+                } else if hoveredOption == title {
+                    hoveredOption = nil
+                }
+            }
     }
 
     @ViewBuilder
@@ -1433,7 +1477,11 @@ private struct MessageBubble: View {
         .buttonStyle(.plain)
         .disabled(!actionsEnabled)
         .focused($rewriteButtonFocused)
-        .opacity(actionsEnabled ? (isHovering || rewriteButtonFocused ? 0.9 : 0.48) : 0.25)
+        .opacity(
+            actionsEnabled
+                ? (isHovering || rewriteButtonFocused ? 0.9 : 0)
+                : (isHovering ? 0.25 : 0)
+        )
         .help(help)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityIdentifier(accessibilityIdentifier)
