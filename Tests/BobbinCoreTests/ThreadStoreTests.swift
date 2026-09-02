@@ -67,6 +67,71 @@ final class ThreadStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testRunningExpiredThreadIsDeferredToTheNextCleanupCycle() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let running = try fixture.store.createThread(
+            workingDirectory: "/tmp/running",
+            now: now.addingTimeInterval(-8 * 24 * 60 * 60)
+        )
+        try fixture.store.update(running.id) { thread in
+            thread.status = .running
+        }
+
+        XCTAssertTrue(fixture.store.expiredThreads(now: now).isEmpty)
+    }
+
+    @MainActor
+    func testAutomaticCleanupCanBeDisabledWithoutFadingOrExpiringThreads() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let now = Date(timeIntervalSince1970: 2_000_000)
+        let old = try fixture.store.createThread(
+            workingDirectory: "/tmp/old",
+            now: now.addingTimeInterval(-8 * 24 * 60 * 60)
+        )
+
+        try fixture.store.setAutomaticCleanupEnabled(false)
+
+        XCTAssertFalse(fixture.store.automaticCleanupEnabled)
+        XCTAssertTrue(fixture.store.expiredThreads(now: now).isEmpty)
+        XCTAssertEqual(fixture.store.opacity(for: old, now: now), 1)
+        XCTAssertFalse(try ThreadStore(paths: fixture.paths).automaticCleanupEnabled)
+    }
+
+    @MainActor
+    func testDeletionTombstoneRemovesContentAndTracksAllServerRoots() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+        try fixture.store.update(thread.id) { thread in
+            thread.codexThreadID = "current-root"
+            thread.codexThreadID = "replacement-root"
+            thread.messages = [ChatMessage(role: .user, text: "private content")]
+        }
+
+        let tombstone = try fixture.store.removeThreadAndRecordDeletion(
+            thread.id,
+            codexThreadIDs: try XCTUnwrap(
+                fixture.store.state.threads.first(where: { $0.id == thread.id })?.codexThreadIDs
+            ),
+            reason: .manual
+        )
+
+        XCTAssertFalse(fixture.store.state.threads.contains(where: { $0.id == thread.id }))
+        XCTAssertEqual(tombstone.codexThreadIDs, ["replacement-root", "current-root"])
+        XCTAssertEqual(tombstone.localThreadID, thread.id)
+        let reloaded = try ThreadStore(paths: fixture.paths)
+        let persisted = try XCTUnwrap(reloaded.state.deletionTombstones.first)
+        XCTAssertEqual(persisted.id, tombstone.id)
+        XCTAssertEqual(persisted.localThreadID, tombstone.localThreadID)
+        XCTAssertEqual(persisted.codexThreadIDs, tombstone.codexThreadIDs)
+        XCTAssertEqual(persisted.reason, tombstone.reason)
+        XCTAssertFalse(try String(contentsOf: fixture.paths.stateFile, encoding: .utf8).contains("private content"))
+    }
+
+    @MainActor
     func testStateRoundTripsWithoutSecrets() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

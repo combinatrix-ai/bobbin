@@ -230,7 +230,8 @@ private struct ThreadListView: View {
                                 opacity: controller.opacity(for: thread),
                                 select: { open(thread.id) },
                                 save: { controller.saveThread(thread.id) },
-                                delete: { controller.deleteThread(thread.id) }
+                                delete: { controller.deleteThread(thread.id) },
+                                automaticCleanupEnabled: controller.automaticCleanupEnabled
                             )
                         }
 
@@ -340,6 +341,9 @@ private struct SettingsMenu: View {
     @ObservedObject var controller: HarnessController
     let openSystemPrompt: () -> Void
 
+    @State private var showingCleanupConfirmation = false
+    @State private var awaitingCleanupScan = false
+
     var body: some View {
         HStack(spacing: 2) {
             Menu {
@@ -374,6 +378,34 @@ private struct SettingsMenu: View {
 
                 Divider()
                 Button("System prompt…", action: openSystemPrompt)
+                if !controller.isDemoMode {
+                    Toggle(
+                        "Automatic cleanup (7 days)",
+                        isOn: Binding(
+                            get: { controller.automaticCleanupEnabled },
+                            set: { controller.requestAutomaticCleanupChange($0) }
+                        )
+                    )
+                    Button("Clean up past Codex threads…") {
+                        awaitingCleanupScan = true
+                        controller.scanUnlinkedCodexThreads()
+                    }
+                    .disabled(
+                        controller.serverState != .ready
+                            || controller.isScanningUnlinkedThreads
+                            || controller.isCleaningUnlinkedThreads
+                    )
+                    if let count = controller.unlinkedCodexThreadCount {
+                        Text(count == 0
+                            ? "No unlinked threads older than 7 days"
+                            : String(count) + " unlinked thread" + (count == 1 ? "" : "s") + " ready to clean up")
+                    } else if controller.isScanningUnlinkedThreads {
+                        Text("Scanning past Codex threads…")
+                    }
+                    if controller.pendingDeletionCount > 0 {
+                        Text("Deletion pending: " + String(controller.pendingDeletionCount))
+                    }
+                }
                 // Status lives here, on demand, rather than as a permanent
                 // light on the main surface.
                 Text("Server: \(controller.serverState.settingsLabel)")
@@ -396,6 +428,60 @@ private struct SettingsMenu: View {
             .help("Settings")
             .accessibilityLabel("Settings")
         }
+        .onChange(of: controller.unlinkedCodexThreadCount) { _, count in
+            guard awaitingCleanupScan, let count else { return }
+            awaitingCleanupScan = false
+            showingCleanupConfirmation = count > 0
+        }
+        .onChange(of: controller.isScanningUnlinkedThreads) { _, isScanning in
+            if !isScanning, controller.unlinkedCodexThreadCount == nil {
+                awaitingCleanupScan = false
+            }
+        }
+        .alert("Clean up past Codex threads?", isPresented: $showingCleanupConfirmation) {
+            Button("Delete", role: .destructive) {
+                controller.cleanupUnlinkedCodexThreads()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(cleanupMessage)
+        }
+        .alert(
+            "Enable automatic cleanup?",
+            isPresented: Binding(
+                get: { controller.pendingCleanupEnableCount != nil },
+                set: { isPresented in
+                    if !isPresented { controller.cancelAutomaticCleanupEnable() }
+                }
+            )
+        ) {
+            Button("Enable and delete", role: .destructive) {
+                controller.confirmAutomaticCleanupEnable()
+            }
+            Button("Cancel", role: .cancel) {
+                controller.cancelAutomaticCleanupEnable()
+            }
+        } message: {
+            Text(cleanupEnableMessage)
+        }
+    }
+
+    private var cleanupMessage: String {
+        guard let count = controller.unlinkedCodexThreadCount else {
+            return "No eligible threads were found."
+        }
+        if count == 0 {
+            return "No unlinked Codex threads older than 7 days were found."
+        }
+        return "This will permanently delete " + String(count)
+            + " unlinked Codex thread" + (count == 1 ? "" : "s")
+            + " older than 7 days. Saved and linked Bobbin conversations are kept."
+    }
+
+    private var cleanupEnableMessage: String {
+        guard let count = controller.pendingCleanupEnableCount else { return "" }
+        return "Enabling automatic cleanup will permanently delete " + String(count)
+            + " expired conversation" + (count == 1 ? "" : "s") + "."
     }
 
     private var authenticationLabel: String {
@@ -602,6 +688,23 @@ private struct ThreadRow: View {
     let select: () -> Void
     let save: () -> Void
     let delete: () -> Void
+    let automaticCleanupEnabled: Bool
+
+    init(
+        thread: HarnessThread,
+        opacity: Double,
+        select: @escaping () -> Void,
+        save: @escaping () -> Void,
+        delete: @escaping () -> Void,
+        automaticCleanupEnabled: Bool = true
+    ) {
+        self.thread = thread
+        self.opacity = opacity
+        self.select = select
+        self.save = save
+        self.delete = delete
+        self.automaticCleanupEnabled = automaticCleanupEnabled
+    }
 
     @State private var isHovering = false
     @FocusState private var saveFocused: Bool
@@ -676,7 +779,7 @@ private struct ThreadRow: View {
     private var metadata: String {
         if thread.status == .running { return "Running" }
         let age = max(0, Date().timeIntervalSince(thread.lastConversationAt))
-        if !thread.isSaved {
+        if automaticCleanupEnabled && !thread.isSaved {
             let remaining = Int(ceil((7 * 24 * 60 * 60 - age) / (24 * 60 * 60)))
             if remaining <= 2 { return "\(max(0, remaining))d left" }
         }

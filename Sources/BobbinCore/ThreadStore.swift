@@ -46,6 +46,14 @@ public final class ThreadStore: ObservableObject {
             .sorted { ($0.savedAt ?? .distantPast) < ($1.savedAt ?? .distantPast) }
     }
 
+    public var automaticCleanupEnabled: Bool {
+        state.automaticCleanupEnabled
+    }
+
+    public var deletionTombstones: [ThreadDeletionTombstone] {
+        state.deletionTombstones
+    }
+
     public var selectedThread: HarnessThread? {
         guard let id = state.selectedThreadID else { return nil }
         return state.threads.first { $0.id == id }
@@ -74,6 +82,11 @@ public final class ThreadStore: ObservableObject {
 
     public func updateSystemPrompt(_ text: String) throws {
         state.defaultSystemPrompt = text
+        try persist()
+    }
+
+    public func setAutomaticCleanupEnabled(_ enabled: Bool) throws {
+        state.automaticCleanupEnabled = enabled
         try persist()
     }
 
@@ -111,14 +124,152 @@ public final class ThreadStore: ObservableObject {
         try persist()
     }
 
+    /// Removes local content before any network work and records only the
+    /// server identifiers needed to finish deletion. The tombstone is kept
+    /// even when the server identifier is not known yet: a late
+    /// `thread/start` response can then be attached safely.
+    @discardableResult
+    public func removeThreadAndRecordDeletion(
+        _ id: UUID,
+        codexThreadIDs: [String],
+        reason: ThreadDeletionReason,
+        now: Date = Date()
+    ) throws -> ThreadDeletionTombstone {
+        let uniqueIDs = codexThreadIDs.filter { !$0.isEmpty }.reduce(into: [String]()) {
+            if !$0.contains($1) { $0.append($1) }
+        }
+        if let index = state.deletionTombstones.firstIndex(where: { $0.localThreadID == id }) {
+            state.deletionTombstones[index].codexThreadIDs = uniqueIDs.reduce(
+                into: state.deletionTombstones[index].codexThreadIDs
+            ) { result, value in
+                if !result.contains(value) { result.append(value) }
+            }
+            state.threads.removeAll { $0.id == id }
+            if state.selectedThreadID == id { state.selectedThreadID = nil }
+            try persist()
+            return state.deletionTombstones[index]
+        }
+
+        let tombstone = ThreadDeletionTombstone(
+            localThreadID: id,
+            codexThreadIDs: uniqueIDs,
+            reason: reason,
+            requestedAt: now
+        )
+        state.deletionTombstones.append(tombstone)
+        state.threads.removeAll { $0.id == id }
+        if state.selectedThreadID == id { state.selectedThreadID = nil }
+        try persist()
+        return tombstone
+    }
+
+    @discardableResult
+    public func recordServerDeletion(
+        codexThreadIDs: [String],
+        reason: ThreadDeletionReason,
+        localThreadID: UUID? = nil,
+        now: Date = Date()
+    ) throws -> ThreadDeletionTombstone {
+        let uniqueIDs = codexThreadIDs.filter { !$0.isEmpty }.reduce(into: [String]()) {
+            if !$0.contains($1) { $0.append($1) }
+        }
+        if let index = state.deletionTombstones.firstIndex(where: {
+            $0.localThreadID == localThreadID && $0.reason == reason
+        }) {
+            state.deletionTombstones[index].codexThreadIDs = uniqueIDs.reduce(
+                into: state.deletionTombstones[index].codexThreadIDs
+            ) { result, value in
+                if !result.contains(value) { result.append(value) }
+            }
+            try persist()
+            return state.deletionTombstones[index]
+        }
+
+        let tombstone = ThreadDeletionTombstone(
+            localThreadID: localThreadID,
+            codexThreadIDs: uniqueIDs,
+            reason: reason,
+            requestedAt: now
+        )
+        state.deletionTombstones.append(tombstone)
+        try persist()
+        return tombstone
+    }
+
+    public func updateDeletionTombstone(
+        _ id: UUID,
+        mutate: (inout ThreadDeletionTombstone) -> Void
+    ) throws {
+        guard let index = state.deletionTombstones.firstIndex(where: { $0.id == id }) else {
+            throw HarnessError.threadNotFound
+        }
+        mutate(&state.deletionTombstones[index])
+        try persist()
+    }
+
+    public func appendCodexThreadID(_ codexThreadID: String, toDeletionTombstone id: UUID) throws {
+        guard !codexThreadID.isEmpty else { return }
+        try updateDeletionTombstone(id) { tombstone in
+            if !tombstone.codexThreadIDs.contains(codexThreadID) {
+                tombstone.codexThreadIDs.append(codexThreadID)
+            }
+        }
+    }
+
+    public func removeDeletionTombstone(_ id: UUID) throws {
+        state.deletionTombstones.removeAll { $0.id == id }
+        try persist()
+    }
+
+    public func deletionTombstone(forLocalThreadID id: UUID) -> ThreadDeletionTombstone? {
+        state.deletionTombstones.first { $0.localThreadID == id }
+    }
+
+    public func deletionTombstone(withID id: UUID) -> ThreadDeletionTombstone? {
+        state.deletionTombstones.first { $0.id == id }
+    }
+
+    /// Removes server roots only after the app-server confirms deletion. This
+    /// lets the active local thread keep every root in the known-ID set while
+    /// a tombstone is waiting or retrying, then forgets superseded roots once
+    /// their rollout has really been removed.
+    public func removeCodexThreadIDs(_ ids: Set<String>) throws {
+        guard !ids.isEmpty else { return }
+        var changed = false
+        for index in state.threads.indices {
+            let current = state.threads[index].codexThreadID
+            let remaining = state.threads[index].codexThreadIDs.filter { !ids.contains($0) }
+            if remaining != state.threads[index].codexThreadIDs {
+                state.threads[index].codexThreadIDs = remaining
+                if let current, ids.contains(current) {
+                    state.threads[index].codexThreadID = nil
+                }
+                changed = true
+            }
+        }
+        if changed { try persist() }
+    }
+
     public func expiredThreads(now: Date = Date()) -> [HarnessThread] {
+        guard automaticCleanupEnabled else { return [] }
+        return expirationCandidates(now: now)
+    }
+
+    /// Count candidates independently of the switch state so the UI can warn
+    /// before turning cleanup back on.
+    public func expiredCandidateCount(now: Date = Date()) -> Int {
+        expirationCandidates(now: now).count
+    }
+
+    private func expirationCandidates(now: Date) -> [HarnessThread] {
         state.threads.filter {
-            !$0.isSaved && now.timeIntervalSince($0.lastConversationAt) >= retentionInterval
+            !$0.isSaved && $0.status != .running
+                && now.timeIntervalSince($0.lastConversationAt) >= retentionInterval
         }
     }
 
     public func opacity(for thread: HarnessThread, now: Date = Date()) -> Double {
-        guard !thread.isSaved else { return 1 }
+        guard automaticCleanupEnabled, !thread.isSaved else { return 1 }
         let age = max(0, now.timeIntervalSince(thread.lastConversationAt))
         let progress = min(1, age / retentionInterval)
         return 1 - (0.58 * progress)

@@ -156,6 +156,9 @@ final class HarnessControllerTests: XCTestCase {
         await waitUntil("running thread interrupt is requested") {
             client.requests.contains(where: { $0.method == "turn/interrupt" })
         }
+        await waitUntil("running thread server deletion is requested") {
+            client.requests.contains(where: { $0.method == "thread/delete" })
+        }
 
         XCTAssertFalse(controller.store.state.threads.contains(where: { $0.id == running.id }))
         XCTAssertNil(controller.store.state.selectedThreadID)
@@ -167,6 +170,13 @@ final class HarnessControllerTests: XCTestCase {
             client.requests.first(where: { $0.method == "turn/interrupt" })?.params?["turnId"] as? String,
             "server-turn"
         )
+        let runningRequestMethods = client.requests.compactMap { request -> String? in
+            guard request.method == "turn/interrupt" || request.method == "thread/delete" else {
+                return nil
+            }
+            return request.method
+        }
+        XCTAssertEqual(runningRequestMethods, ["turn/interrupt", "thread/delete"])
     }
 
     func testModelChangesShareOneReasoningFallbackPolicy() throws {
@@ -302,6 +312,7 @@ final class HarnessControllerTests: XCTestCase {
 
         let rewritten = try XCTUnwrap(controller.store.state.threads.first(where: { $0.id == threadID }))
         XCTAssertEqual(rewritten.codexThreadID, "forked-thread")
+        XCTAssertEqual(rewritten.codexThreadIDs, ["forked-thread", "original-thread"])
         XCTAssertEqual(rewritten.messages.map(\.text), ["first", "first answer", "replacement"])
         XCTAssertEqual(rewritten.messages.last?.turnID, "turn-replacement")
         XCTAssertEqual(rewritten.toolCalls.map(\.itemID), ["tool-1"])
@@ -337,8 +348,13 @@ final class HarnessControllerTests: XCTestCase {
         XCTAssertTrue(controller.editMessage(original.id, replacement: "new title", in: threadID))
         await fulfillment(of: [turnStarted], timeout: 2)
         await waitUntil("first-message edit finishes") { !controller.isRewriting(threadID) }
+        await waitUntil("old server root is deleted") {
+            client.requests.contains {
+                $0.method == "thread/delete" && ($0.params?["threadId"] as? String) == "old-thread"
+            }
+        }
 
-        XCTAssertEqual(client.requests.map(\.method), ["thread/start", "turn/start"])
+        XCTAssertEqual(client.requests.map(\.method), ["thread/start", "turn/start", "thread/delete"])
         let rewritten = try XCTUnwrap(controller.store.state.threads.first(where: { $0.id == threadID }))
         XCTAssertEqual(rewritten.codexThreadID, "fresh-thread")
         XCTAssertEqual(rewritten.title, "new title")
@@ -382,6 +398,7 @@ final class HarnessControllerTests: XCTestCase {
         XCTAssertEqual(input.first?["text"] as? String, "second")
         let rewritten = try XCTUnwrap(controller.store.state.threads.first(where: { $0.id == threadID }))
         XCTAssertEqual(rewritten.messages.map(\.text), ["first", "first answer", "second"])
+        XCTAssertEqual(rewritten.codexThreadIDs, ["regenerated-thread", "original-thread"])
     }
 
     func testRewriteRejectsEmptyWrongRoleMissingRunningAndUnreadyWithoutRequests() throws {
@@ -510,6 +527,9 @@ final class HarnessControllerTests: XCTestCase {
         await waitUntil("failed replacement restores its snapshot") {
             !controller.isRewriting(threadID)
         }
+        await waitUntil("failed replacement server thread is deleted") {
+            client.requests.contains(where: { $0.method == "thread/delete" })
+        }
 
         let restored = try XCTUnwrap(
             controller.store.state.threads.first(where: { $0.id == threadID })
@@ -561,6 +581,233 @@ final class HarnessControllerTests: XCTestCase {
         XCTAssertEqual(thread.messages.map(\.text), ["existing", "answer", "first send"])
     }
 
+    func testUnlinkedThreadScanPagesActiveAndArchivedAndSkipsRunningOrUnknown() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let client = RecordingAppServerClient()
+        client.responseHandler = { method, params in
+            guard method == "thread/list" else { return client.defaultResponse(for: method) }
+            let archived = params?["archived"] as? Bool ?? false
+            if archived {
+                return [
+                    "data": [[
+                        "id": "archived-old",
+                        "updatedAt": NSNumber(value: 1),
+                        "ephemeral": false,
+                        "status": ["type": "idle"]
+                    ]]
+                ]
+            }
+            if params?["cursor"] as? String == "active-page-2" {
+                return [
+                    "data": [[
+                        "id": "active-old-page-2",
+                        "updatedAt": NSNumber(value: 1),
+                        "ephemeral": false,
+                        "status": ["type": "idle"]
+                    ]]
+                ]
+            }
+            return [
+                "data": [
+                    [
+                        "id": "active-old",
+                        "updatedAt": NSNumber(value: 1),
+                        "ephemeral": false,
+                        "status": ["type": "idle"]
+                    ],
+                    [
+                        "id": "running-old",
+                        "updatedAt": NSNumber(value: 1),
+                        "ephemeral": false,
+                        "status": ["type": "active"]
+                    ],
+                    [
+                        "id": "unknown-old",
+                        "updatedAt": NSNumber(value: 1),
+                        "ephemeral": false
+                    ],
+                    [
+                        "id": "linked-old",
+                        "updatedAt": NSNumber(value: 1),
+                        "ephemeral": false,
+                        "status": ["type": "idle"]
+                    ]
+                ],
+                "nextCursor": "active-page-2"
+            ]
+        }
+        let controller = try HarnessController(testPaths: fixture.paths, appServerClient: client)
+        let localThreadID = try XCTUnwrap(controller.store.state.selectedThreadID)
+        try controller.store.update(localThreadID) { $0.codexThreadID = "linked-old" }
+
+        controller.scanUnlinkedCodexThreads()
+        await waitUntil("unlinked scan finishes") {
+            controller.unlinkedCodexThreadCount == 3
+        }
+
+        let listRequests = client.requests.filter { $0.method == "thread/list" }
+        XCTAssertEqual(listRequests.count, 3)
+        XCTAssertEqual(
+            listRequests.compactMap { $0.params?["cursor"] as? String },
+            ["active-page-2"]
+        )
+        XCTAssertTrue(listRequests.allSatisfy {
+            ($0.params?["sourceKinds"] as? [String]) == ["appServer"]
+        })
+    }
+
+    func testOrphanCleanupRechecksBothListsBeforeDeletingEligibleThreads() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let client = RecordingAppServerClient()
+        client.responseHandler = { method, params in
+            guard method == "thread/list" else { return client.defaultResponse(for: method) }
+            let archived = params?["archived"] as? Bool ?? false
+            return [
+                "data": [[
+                    "id": archived ? "archived-orphan" : "active-orphan",
+                    "updatedAt": NSNumber(value: 1),
+                    "ephemeral": false,
+                    "status": ["type": "idle"]
+                ]]
+            ]
+        }
+        let controller = try HarnessController(testPaths: fixture.paths, appServerClient: client)
+
+        controller.scanUnlinkedCodexThreads()
+        await waitUntil("orphan scan finishes") {
+            controller.unlinkedCodexThreadCount == 2
+        }
+        controller.cleanupUnlinkedCodexThreads()
+        await waitUntil("orphan deletion finishes") {
+            controller.store.deletionTombstones.isEmpty
+                && client.requests.filter { $0.method == "thread/delete" }.count == 2
+        }
+
+        XCTAssertEqual(client.requests.filter { $0.method == "thread/list" }.count, 4)
+        XCTAssertEqual(
+            Set(client.requests.filter { $0.method == "thread/delete" }
+                .compactMap { $0.params?["threadId"] as? String }),
+            ["active-orphan", "archived-orphan"]
+        )
+    }
+
+    func testManualDeleteQueuesServerRootsAndClearsTombstoneOnSuccess() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let client = RecordingAppServerClient()
+        let controller = try HarnessController(testPaths: fixture.paths, appServerClient: client)
+        let threadID = try XCTUnwrap(controller.store.state.selectedThreadID)
+        try controller.store.update(threadID) { thread in
+            thread.codexThreadID = "root"
+            thread.codexThreadID = "fork"
+        }
+
+        controller.deleteThread(threadID)
+        await waitUntil("server roots are deleted") {
+            client.requests.filter { $0.method == "thread/delete" }.count == 2
+                && controller.store.deletionTombstones.isEmpty
+        }
+
+        XCTAssertFalse(controller.store.state.threads.contains(where: { $0.id == threadID }))
+        XCTAssertEqual(
+            client.requests.filter { $0.method == "thread/delete" }
+                .compactMap { $0.params?["threadId"] as? String },
+            ["fork", "root"]
+        )
+    }
+
+    func testDeletionContinuesPastBlockedParentAndKeepsOnlyFailedRootForRetry() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let client = RecordingAppServerClient()
+        client.responseHandler = { method, params in
+            if method == "thread/delete", params?["threadId"] as? String == "parent" {
+                throw HarnessError.serverError(
+                    code: -32600,
+                    message: "forked history still references it"
+                )
+            }
+            return client.defaultResponse(for: method)
+        }
+        let controller = try HarnessController(testPaths: fixture.paths, appServerClient: client)
+        let threadID = try XCTUnwrap(controller.store.state.selectedThreadID)
+        try controller.store.update(threadID) { thread in
+            thread.codexThreadIDs = ["parent", "child"]
+            thread.codexThreadID = "parent"
+        }
+
+        controller.deleteThread(threadID)
+        await waitUntil("child is deleted while parent waits for retry") {
+            client.requests.filter { $0.method == "thread/delete" }.count == 2
+                && controller.store.deletionTombstones.first?.codexThreadIDs == ["parent"]
+        }
+
+        XCTAssertEqual(
+            client.requests.filter { $0.method == "thread/delete" }
+                .compactMap { $0.params?["threadId"] as? String },
+            ["parent", "child"]
+        )
+        XCTAssertEqual(controller.store.deletionTombstones.first?.attemptCount, 1)
+        XCTAssertNotNil(controller.store.deletionTombstones.first?.nextRetryAt)
+    }
+
+    func testReenablingCleanupRequiresConfirmationForExpiredConversations() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let controller = try HarnessController(
+            testPaths: fixture.paths,
+            appServerClient: RecordingAppServerClient()
+        )
+        let now = Date()
+        let thread = try controller.store.createThread(
+            workingDirectory: "/tmp/expired",
+            now: now.addingTimeInterval(-8 * 24 * 60 * 60)
+        )
+        controller.setAutomaticCleanupEnabled(false)
+
+        XCTAssertEqual(controller.expiredCandidateCount, 1)
+        controller.requestAutomaticCleanupChange(true)
+        XCTAssertFalse(controller.automaticCleanupEnabled)
+        XCTAssertEqual(controller.pendingCleanupEnableCount, 1)
+
+        controller.cancelAutomaticCleanupEnable()
+        XCTAssertFalse(controller.automaticCleanupEnabled)
+        controller.requestAutomaticCleanupChange(true)
+        controller.confirmAutomaticCleanupEnable()
+        await waitUntil("expired conversation is cleaned after confirmation") {
+            !controller.store.state.threads.contains(where: { $0.id == thread.id })
+        }
+        XCTAssertTrue(controller.automaticCleanupEnabled)
+        XCTAssertNil(controller.pendingCleanupEnableCount)
+    }
+
+    func testDeletingWhileThreadStartIsPendingDeletesLateServerRoot() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let client = RecordingAppServerClient()
+        client.deferThreadStart = true
+        let controller = try HarnessController(testPaths: fixture.paths, appServerClient: client)
+        let localID = try XCTUnwrap(controller.store.state.selectedThreadID)
+
+        controller.send("will be deleted", in: localID)
+        await waitUntil("thread/start is held") { client.threadStartPending }
+        controller.deleteThread(localID)
+        client.releaseThreadStart()
+
+        await waitUntil("late server root is deleted") {
+            controller.store.deletionTombstones.isEmpty && client.requests.contains {
+                $0.method == "thread/delete"
+                    && ($0.params?["threadId"] as? String) == "server-thread"
+            }
+        }
+        XCTAssertTrue(controller.store.deletionTombstones.isEmpty)
+        XCTAssertNil(controller.lastError)
+    }
+
     private func waitUntil(
         _ description: String,
         condition: @escaping @MainActor () -> Bool
@@ -588,6 +835,9 @@ private final class RecordingAppServerClient: HarnessAppServerClient {
     private var recordedRequests: [Request] = []
     private var turnStartHandler: (() -> Void)?
     private var customResponseHandler: ResponseHandler?
+    private var shouldDeferThreadStart = false
+    private var deferredThreadStart: CheckedContinuation<CodexAppServerClient.JSONObject, Never>?
+    private var isThreadStartPending = false
 
     var onNotification: CodexAppServerClient.NotificationHandler?
     var onTermination: CodexAppServerClient.TerminationHandler?
@@ -612,6 +862,25 @@ private final class RecordingAppServerClient: HarnessAppServerClient {
         set { lock.withLock { customResponseHandler = newValue } }
     }
 
+    var deferThreadStart: Bool {
+        get { lock.withLock { shouldDeferThreadStart } }
+        set { lock.withLock { shouldDeferThreadStart = newValue } }
+    }
+
+    var threadStartPending: Bool {
+        lock.withLock { isThreadStartPending }
+    }
+
+    func releaseThreadStart() {
+        let continuation = lock.withLock {
+            isThreadStartPending = false
+            let continuation = deferredThreadStart
+            deferredThreadStart = nil
+            return continuation
+        }
+        continuation?.resume(returning: ["thread": ["id": "server-thread"]])
+    }
+
     func start() async throws {}
 
     func stop() {}
@@ -629,6 +898,14 @@ private final class RecordingAppServerClient: HarnessAppServerClient {
         }
 
         callback()
+        if method == "thread/start", lock.withLock({ shouldDeferThreadStart }) {
+            return await withCheckedContinuation { continuation in
+                lock.withLock {
+                    isThreadStartPending = true
+                    deferredThreadStart = continuation
+                }
+            }
+        }
         if let responseHandler {
             return try responseHandler(method, params)
         }

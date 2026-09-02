@@ -86,6 +86,14 @@ public final class HarnessController: ObservableObject {
     /// Local threads currently undergoing a server fork/start followed by a
     /// replacement turn. The UI uses this to disable duplicate actions.
     @Published public private(set) var rewritingThreadIDs: Set<UUID> = []
+    /// Number of old server threads found during the last reconciliation.
+    /// This is deliberately a count, never a transcript or title.
+    @Published public private(set) var unlinkedCodexThreadCount: Int?
+    @Published public private(set) var isScanningUnlinkedThreads = false
+    @Published public private(set) var isCleaningUnlinkedThreads = false
+    /// Non-nil while the UI asks for confirmation before re-enabling cleanup
+    /// that would immediately remove already-expired local conversations.
+    @Published public private(set) var pendingCleanupEnableCount: Int?
 
     public let store: ThreadStore
     /// Demo controllers are fully populated before the view appears and never
@@ -98,6 +106,10 @@ public final class HarnessController: ObservableObject {
     private var streamingMessages: [String: UUID] = [:]
     private var toolOutputs: [String: String] = [:]
     private var bootTask: Task<Void, Never>?
+    private var deletionTasks: [UUID: Task<Void, Never>] = [:]
+    private var deletionRetryTasks: [UUID: Task<Void, Never>] = [:]
+    private var startingThreadIDs: Set<UUID> = []
+    private var scannedUnlinkedCodexThreadIDs: Set<String> = []
 
     public init(paths: HarnessPaths? = nil, keyProvider: APIKeyProvider = APIKeyProvider()) throws {
         let paths = try paths ?? HarnessPaths()
@@ -162,6 +174,9 @@ public final class HarnessController: ObservableObject {
     public var selectedThread: HarnessThread? { store.selectedThread }
     public var activeThreads: [HarnessThread] { store.activeThreads }
     public var savedThreads: [HarnessThread] { store.savedThreads }
+    public var automaticCleanupEnabled: Bool { store.automaticCleanupEnabled }
+    public var expiredCandidateCount: Int { store.expiredCandidateCount() }
+    public var pendingDeletionCount: Int { store.deletionTombstones.count }
     /// The list composer is ready for typing in production, but stays
     /// unfocused in demo mode so captures do not include a text caret.
     public var shouldAutofocusNewThread: Bool { !isDemoMode }
@@ -376,15 +391,58 @@ public final class HarnessController: ObservableObject {
 
     public func deleteThread(_ id: UUID) {
         guard let thread = store.state.threads.first(where: { $0.id == id }) else { return }
-        if thread.status == .running {
-            stopThread(id)
-        }
+        let interruptTask = thread.status == .running ? makeInterruptTask(thread) : nil
         do {
-            try store.removeThread(id)
+            let tombstone = try store.removeThreadAndRecordDeletion(
+                id,
+                codexThreadIDs: thread.codexThreadIDs,
+                reason: .manual
+            )
             objectWillChange.send()
+            scheduleDeletion(tombstone, after: interruptTask)
         } catch {
             report(error)
         }
+    }
+
+    /// The retention switch is persisted independently of the app-server. A
+    /// transition back to enabled immediately processes already expired local
+    /// threads once the server is ready.
+    public func setAutomaticCleanupEnabled(_ enabled: Bool) {
+        do {
+            try store.setAutomaticCleanupEnabled(enabled)
+            objectWillChange.send()
+            guard enabled, let client, serverState == .ready else { return }
+            Task { [weak self] in
+                await self?.cleanupExpiredThreads(using: client)
+            }
+        } catch {
+            report(error)
+        }
+    }
+
+    /// Called by the Settings toggle. Enabling with expired candidates is a
+    /// destructive transition, so the UI confirms it separately.
+    public func requestAutomaticCleanupChange(_ enabled: Bool) {
+        guard enabled, !automaticCleanupEnabled else {
+            setAutomaticCleanupEnabled(enabled)
+            return
+        }
+        let count = expiredCandidateCount
+        guard count > 0 else {
+            setAutomaticCleanupEnabled(true)
+            return
+        }
+        pendingCleanupEnableCount = count
+    }
+
+    public func confirmAutomaticCleanupEnable() {
+        pendingCleanupEnableCount = nil
+        setAutomaticCleanupEnabled(true)
+    }
+
+    public func cancelAutomaticCleanupEnable() {
+        pendingCleanupEnableCount = nil
     }
 
     public func send(_ text: String, in localThreadID: UUID) {
@@ -422,27 +480,38 @@ public final class HarnessController: ObservableObject {
             do {
                 try await sendTurn(trimmed, localThreadID: localThreadID)
             } catch {
+                // A manual delete removes the local transcript before the
+                // server request can finish. The resulting threadNotFound is
+                // an expected cancellation, not a user-facing failure.
+                guard store.state.threads.contains(where: { $0.id == localThreadID }) else {
+                    return
+                }
                 failTurn(error, localThreadID: localThreadID)
             }
         }
     }
 
     public func stopThread(_ localThreadID: UUID) {
+        guard let thread = store.state.threads.first(where: { $0.id == localThreadID }) else { return }
+        _ = makeInterruptTask(thread)
+    }
+
+    @discardableResult
+    private func makeInterruptTask(_ thread: HarnessThread) -> Task<Void, Never>? {
         guard
-            let thread = store.state.threads.first(where: { $0.id == localThreadID }),
             let codexThreadID = thread.codexThreadID,
             let turnID = thread.activeTurnID,
             let client
-        else { return }
+        else { return nil }
 
-        Task {
+        return Task { [weak self] in
             do {
                 _ = try await client.request(
                     method: "turn/interrupt",
                     params: ["threadId": codexThreadID, "turnId": turnID]
                 )
             } catch {
-                report(error)
+                self?.report(error)
             }
         }
     }
@@ -586,6 +655,8 @@ public final class HarnessController: ObservableObject {
     private struct ServerRewriteResult {
         let replacementThreadID: String
         let removedTurnIDs: Set<String>
+        /// Forked history keeps its source rollout. A fresh thread does not.
+        let keepsSourceRollout: Bool
     }
 
     /// The local half of a rewrite is optimistic so notifications for the
@@ -681,6 +752,18 @@ public final class HarnessController: ObservableObject {
                 oldCodexThreadID: oldCodexThreadID,
                 client: client
             )
+            guard result.replacementThreadID != oldCodexThreadID else {
+                throw HarnessError.malformedResponse("rewrite returned the original thread")
+            }
+            guard store.state.threads.contains(where: { $0.id == plan.localThreadID }) else {
+                if let tombstone = try? store.recordServerDeletion(
+                    codexThreadIDs: [result.replacementThreadID],
+                    reason: .rewrite
+                ) {
+                    scheduleDeletion(tombstone)
+                }
+                return
+            }
             let snapshot = try localRewriteSnapshot(
                 plan,
                 removedTurnIDs: result.removedTurnIDs
@@ -701,6 +784,13 @@ public final class HarnessController: ObservableObject {
                     resumeExistingThread: false,
                     requestConfiguration: executionThread
                 )
+                if !result.keepsSourceRollout {
+                    let tombstone = try store.recordServerDeletion(
+                        codexThreadIDs: [oldCodexThreadID],
+                        reason: .rewrite
+                    )
+                    scheduleDeletion(tombstone)
+                }
             } catch let turnError {
                 // The fork/start succeeded but the replacement turn did not.
                 // Restore the exact visible transcript and best-effort discard
@@ -710,13 +800,20 @@ public final class HarnessController: ObservableObject {
                 } catch {
                     report(error)
                 }
-                _ = try? await client.request(
-                    method: "thread/delete",
-                    params: ["threadId": result.replacementThreadID]
-                )
+                if let tombstone = try? store.recordServerDeletion(
+                    codexThreadIDs: [result.replacementThreadID],
+                    reason: .rewrite
+                ) {
+                    scheduleDeletion(tombstone)
+                }
                 throw turnError
             }
         } catch {
+            // Manual deletion intentionally removes the local thread first;
+            // its in-flight server work must not surface as a user error.
+            guard store.state.threads.contains(where: { $0.id == plan.localThreadID }) else {
+                return
+            }
             report(error)
         }
     }
@@ -737,7 +834,8 @@ public final class HarnessController: ObservableObject {
                 removedTurnIDs: Set(
                     thread.messages[plan.messageIndex...].compactMap(\.turnID)
                         + thread.toolCalls.compactMap(\.turnID)
-                )
+                ),
+                keepsSourceRollout: false
             )
         }
 
@@ -769,7 +867,8 @@ public final class HarnessController: ObservableObject {
         )
         return ServerRewriteResult(
             replacementThreadID: try Self.threadID(from: forkResponse, method: "thread/fork"),
-            removedTurnIDs: Set(serverTurnIDs[plan.userOrdinal...])
+            removedTurnIDs: Set(serverTurnIDs[plan.userOrdinal...]),
+            keepsSourceRollout: true
         )
     }
 
@@ -857,6 +956,7 @@ public final class HarnessController: ObservableObject {
                 // Preserve settings and save-state changes made while the network
                 // request was pending; only the conversational fields roll back.
                 thread.codexThreadID = snapshot.thread.codexThreadID
+                thread.codexThreadIDs = snapshot.thread.codexThreadIDs
                 thread.activeTurnID = snapshot.thread.activeTurnID
                 thread.title = snapshot.thread.title
                 thread.lastConversationAt = snapshot.thread.lastConversationAt
@@ -935,7 +1035,9 @@ public final class HarnessController: ObservableObject {
             serverState = .ready
 
             try await loadModelCatalog(using: client)
+            retryPendingDeletions(using: client)
             await cleanupExpiredThreads(using: client)
+            await reconcileUnlinkedCodexThreads(using: client)
             try await resolveAuthentication(using: client)
         } catch {
             serverState = .stopped(error.localizedDescription)
@@ -1079,11 +1181,32 @@ public final class HarnessController: ObservableObject {
         let requestThread = requestConfiguration ?? thread
 
         if thread.codexThreadID == nil {
-            let response = try await client.request(
-                method: "thread/start",
-                params: Self.threadStartParameters(for: requestThread)
-            )
+            startingThreadIDs.insert(localThreadID)
+            let response: CodexAppServerClient.JSONObject
+            do {
+                response = try await client.request(
+                    method: "thread/start",
+                    params: Self.threadStartParameters(for: requestThread)
+                )
+            } catch {
+                startingThreadIDs.remove(localThreadID)
+                throw error
+            }
+            startingThreadIDs.remove(localThreadID)
             let codexID = try Self.threadID(from: response, method: "thread/start")
+            if let tombstone = store.deletionTombstone(forLocalThreadID: localThreadID) {
+                // The user deleted the local thread while start was pending.
+                // Attach the late server ID before issuing deletion, then do
+                // not let this stale turn mutate local state.
+                try store.appendCodexThreadID(codexID, toDeletionTombstone: tombstone.id)
+                if let updated = store.state.deletionTombstones.first(where: { $0.id == tombstone.id }) {
+                    // If the original deletion task has not run yet, it will
+                    // read the updated tombstone. If it already returned after
+                    // seeing an in-flight start, this schedules the retry.
+                    scheduleDeletion(updated)
+                }
+                throw HarnessError.threadNotFound
+            }
             // A rewrite cannot run while an ordinary send owns the thread, but
             // still verify the identity after every await before mutating the
             // persisted transcript.
@@ -1178,21 +1301,360 @@ public final class HarnessController: ObservableObject {
         report(error)
     }
 
-    private func cleanupExpiredThreads(using client: CodexAppServerClient) async {
-        for thread in store.expiredThreads() {
-            do {
-                if let codexThreadID = thread.codexThreadID {
-                    _ = try await client.request(
-                        method: "thread/delete",
-                        params: ["threadId": codexThreadID]
-                    )
+    private func scheduleDeletion(
+        _ tombstone: ThreadDeletionTombstone,
+        after prerequisite: Task<Void, Never>? = nil
+    ) {
+        guard deletionTasks[tombstone.id] == nil else { return }
+        guard let client else { return }
+        if let nextRetryAt = tombstone.nextRetryAt, nextRetryAt > Date() {
+            scheduleDeletionRetry(tombstone)
+            return
+        }
+        deletionRetryTasks[tombstone.id]?.cancel()
+        deletionRetryTasks.removeValue(forKey: tombstone.id)
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            if let prerequisite { await prerequisite.value }
+            await self.processDeletion(tombstoneID: tombstone.id, using: client)
+        }
+        deletionTasks[tombstone.id] = task
+    }
+
+    private func processDeletion(
+        tombstoneID: UUID,
+        using client: any HarnessAppServerClient
+    ) async {
+        defer { deletionTasks.removeValue(forKey: tombstoneID) }
+        guard let tombstone = store.state.deletionTombstones.first(where: { $0.id == tombstoneID }) else {
+            return
+        }
+
+        if tombstone.codexThreadIDs.isEmpty {
+            // A local-only thread has no server artifact. Keep an empty
+            // tombstone only while its first `thread/start` is still in flight;
+            // that response will attach the ID before this is retried.
+            if let localThreadID = tombstone.localThreadID,
+               startingThreadIDs.contains(localThreadID) {
+                return
+            }
+            try? store.removeDeletionTombstone(tombstoneID)
+            return
+        }
+
+        do {
+            var processedIDs = Set<String>()
+            var deletedIDs = Set<String>()
+            var latestDeletionError: Error?
+            while let current = store.deletionTombstone(withID: tombstoneID) {
+                let pendingIDs = current.codexThreadIDs.filter { !processedIDs.contains($0) }
+                guard !pendingIDs.isEmpty else { break }
+                for codexThreadID in pendingIDs {
+                    processedIDs.insert(codexThreadID)
+                    do {
+                        _ = try await client.request(
+                            method: "thread/delete",
+                            params: ["threadId": codexThreadID]
+                        )
+                        deletedIDs.insert(codexThreadID)
+                    } catch {
+                        // Continue through the chain. A parent fork can fail
+                        // until its newer child has been deleted later in this
+                        // same pass.
+                        latestDeletionError = error
+                    }
                 }
-                try store.removeThread(thread.id)
+            }
+
+            if !deletedIDs.isEmpty {
+                try store.removeCodexThreadIDs(deletedIDs)
+                try store.updateDeletionTombstone(tombstoneID) { tombstone in
+                    tombstone.codexThreadIDs.removeAll { deletedIDs.contains($0) }
+                }
+            }
+
+            guard let remaining = store.deletionTombstone(withID: tombstoneID) else { return }
+            if remaining.codexThreadIDs.isEmpty {
+                try store.removeDeletionTombstone(tombstoneID)
+                deletionRetryTasks[tombstoneID]?.cancel()
+                deletionRetryTasks.removeValue(forKey: tombstoneID)
+            } else {
+                let error = latestDeletionError
+                    ?? HarnessError.malformedResponse("thread/delete did not remove all roots")
+                let nextAttempt = remaining.attemptCount + 1
+                let retryAt = Date().addingTimeInterval(Self.deletionRetryDelay(attempt: nextAttempt))
+                try store.updateDeletionTombstone(tombstoneID) { tombstone in
+                    tombstone.attemptCount = nextAttempt
+                    tombstone.nextRetryAt = retryAt
+                    tombstone.lastErrorCode = Self.deletionErrorCode(error)
+                }
+                if let updated = store.deletionTombstone(withID: tombstoneID) {
+                    scheduleDeletionRetry(updated)
+                }
+                report(error)
+            }
+        } catch {
+            let nextAttempt = tombstone.attemptCount + 1
+            let retryAt = Date().addingTimeInterval(Self.deletionRetryDelay(attempt: nextAttempt))
+            try? store.updateDeletionTombstone(tombstoneID) { tombstone in
+                tombstone.attemptCount = nextAttempt
+                tombstone.nextRetryAt = retryAt
+                tombstone.lastErrorCode = Self.deletionErrorCode(error)
+            }
+            if let updated = store.deletionTombstone(withID: tombstoneID) {
+                scheduleDeletionRetry(updated)
+            }
+            report(error)
+        }
+        objectWillChange.send()
+    }
+
+    private func retryPendingDeletions(using client: any HarnessAppServerClient) {
+        let now = Date()
+        for tombstone in store.deletionTombstones {
+            if let nextRetryAt = tombstone.nextRetryAt, nextRetryAt > now {
+                scheduleDeletionRetry(tombstone)
+            } else {
+                scheduleDeletion(tombstone)
+            }
+        }
+    }
+
+    private func scheduleDeletionRetry(
+        _ tombstone: ThreadDeletionTombstone
+    ) {
+        guard let nextRetryAt = tombstone.nextRetryAt else {
+            scheduleDeletion(tombstone)
+            return
+        }
+        guard deletionRetryTasks[tombstone.id] == nil else { return }
+        let delay = max(0, nextRetryAt.timeIntervalSinceNow)
+        let task = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(min(delay, 86_400) * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard let self, !Task.isCancelled,
+                  let current = self.store.deletionTombstone(withID: tombstone.id)
+            else { return }
+            self.deletionRetryTasks.removeValue(forKey: tombstone.id)
+            self.scheduleDeletion(current)
+        }
+        deletionRetryTasks[tombstone.id] = task
+    }
+
+    private static func deletionRetryDelay(attempt: Int) -> TimeInterval {
+        switch attempt {
+        case 1: 60
+        case 2: 5 * 60
+        case 3: 30 * 60
+        case 4: 6 * 60 * 60
+        default: 24 * 60 * 60
+        }
+    }
+
+    private static func deletionErrorCode(_ error: Error) -> String {
+        switch error {
+        case let HarnessError.serverError(code, _): return "server:" + String(code)
+        case HarnessError.appServerStopped: return "app-server-stopped"
+        case let HarnessError.malformedResponse(detail): return "malformed:" + detail
+        default: return String(describing: type(of: error))
+        }
+    }
+
+    private func cleanupExpiredThreads(using client: any HarnessAppServerClient) async {
+        guard store.automaticCleanupEnabled else { return }
+        for thread in store.expiredThreads() {
+            guard store.automaticCleanupEnabled else { return }
+            // A running turn is intentionally left for the next cleanup
+            // cycle. `expiredThreads` excludes it, but keep this guard close
+            // to the destructive operation as a second safety boundary.
+            guard thread.status != .running else { continue }
+            do {
+                let tombstone = try store.removeThreadAndRecordDeletion(
+                    thread.id,
+                    codexThreadIDs: thread.codexThreadIDs,
+                    reason: .expired
+                )
+                scheduleDeletion(tombstone)
             } catch {
                 report(error)
             }
         }
+        retryPendingDeletions(using: client)
         objectWillChange.send()
+    }
+
+    /// Scans both active and archived app-server threads. The dedicated
+    /// Bobbin CODEX_HOME makes an unlinked server ID a safe orphan candidate,
+    /// but server activity remains an explicit safety gate.
+    public func scanUnlinkedCodexThreads() {
+        guard let client, serverState == .ready, !isScanningUnlinkedThreads else { return }
+        unlinkedCodexThreadCount = nil
+        isScanningUnlinkedThreads = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isScanningUnlinkedThreads = false }
+            do {
+                let candidates = try await self.unlinkedCodexThreads(using: client)
+                self.scannedUnlinkedCodexThreadIDs = Set(candidates.map(\.id))
+                self.unlinkedCodexThreadCount = candidates.count
+            } catch {
+                self.scannedUnlinkedCodexThreadIDs = []
+                self.unlinkedCodexThreadCount = nil
+                self.report(error)
+            }
+        }
+    }
+
+    /// Re-reads before deleting, so the confirmation count cannot become a
+    /// stale authorization after another app-server client changes state.
+    public func cleanupUnlinkedCodexThreads() {
+        let approvedIDs = scannedUnlinkedCodexThreadIDs
+        guard !approvedIDs.isEmpty, let client, serverState == .ready,
+              !isCleaningUnlinkedThreads else { return }
+        isCleaningUnlinkedThreads = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer {
+                self.isCleaningUnlinkedThreads = false
+                self.scannedUnlinkedCodexThreadIDs = []
+                self.unlinkedCodexThreadCount = nil
+            }
+            do {
+                // Re-read for safety, but never broaden the confirmation to
+                // IDs which were not part of the count the user approved.
+                let candidates = try await self.unlinkedCodexThreads(using: client)
+                    .filter { approvedIDs.contains($0.id) }
+                for candidate in candidates {
+                    let tombstone = try self.store.recordServerDeletion(
+                        codexThreadIDs: [candidate.id],
+                        reason: .orphaned
+                    )
+                    self.scheduleDeletion(tombstone)
+                }
+                self.objectWillChange.send()
+            } catch {
+                self.report(error)
+            }
+        }
+    }
+
+    private func reconcileUnlinkedCodexThreads(using client: any HarnessAppServerClient) async {
+        do {
+            // Reconciliation on boot is intentionally a scan only. Destructive
+            // orphan cleanup requires the explicit Settings action.
+            unlinkedCodexThreadCount = try await unlinkedCodexThreads(using: client).count
+        } catch {
+            // A server version without thread/list must not prevent normal
+            // conversation startup.
+            unlinkedCodexThreadCount = nil
+        }
+    }
+
+    private func unlinkedCodexThreads(
+        using client: any HarnessAppServerClient,
+        now: Date = Date()
+    ) async throws -> [CodexThreadSummary] {
+        let summaries = try await listCodexThreads(using: client)
+        let linkedIDs = Set(
+            store.state.threads.flatMap(\.codexThreadIDs)
+                + store.state.deletionTombstones.flatMap(\.codexThreadIDs)
+        )
+        return summaries.filter { summary in
+            guard !linkedIDs.contains(summary.id),
+                  let updatedAt = summary.updatedAt,
+                  now.timeIntervalSince(updatedAt) >= store.retentionInterval
+            else { return false }
+            return summary.activityStatus == .idle
+        }
+    }
+
+    private func listCodexThreads(
+        using client: any HarnessAppServerClient
+    ) async throws -> [CodexThreadSummary] {
+        var result: [CodexThreadSummary] = []
+        for archived in [false, true] {
+            var cursor: String?
+            var seenCursors = Set<String>()
+            repeat {
+                var params: [String: Any] = [
+                    "archived": archived,
+                    "limit": 100,
+                    // The app-server default excludes appServer threads.
+                    "sourceKinds": ["appServer"]
+                ]
+                if let cursor { params["cursor"] = cursor }
+                let response = try await client.request(method: "thread/list", params: params)
+                let rawThreads = (response["data"] as? [[String: Any]])
+                    ?? (response["threads"] as? [[String: Any]])
+                guard let rawThreads else {
+                    throw HarnessError.malformedResponse("thread/list.data")
+                }
+                result.append(contentsOf: rawThreads.compactMap { Self.codexThreadSummary(from: $0, archived: archived) })
+                let next = (response["nextCursor"] as? String)
+                    ?? (response["next_cursor"] as? String)
+                if let next, !next.isEmpty, seenCursors.insert(next).inserted {
+                    cursor = next
+                } else {
+                    cursor = nil
+                }
+            } while cursor != nil
+        }
+        return result
+    }
+
+    private static func codexThreadSummary(
+        from value: [String: Any],
+        archived: Bool
+    ) -> CodexThreadSummary? {
+        guard let id = value["id"] as? String, !id.isEmpty else { return nil }
+        if value["ephemeral"] as? Bool == true { return nil }
+
+        let updatedAt = date(from: value["updatedAt"] ?? value["updated_at"])
+        let rawStatus = value["status"]
+        let activityStatus: CodexThreadActivityStatus
+        if archived {
+            activityStatus = .idle
+        } else if let status = rawStatus as? String {
+            switch status.lowercased() {
+            case "active", "running", "inprogress", "in_progress": activityStatus = .running
+            case "idle", "notloaded", "not_loaded", "systemerror", "system_error": activityStatus = .idle
+            default: activityStatus = .unknown
+            }
+        } else if let status = rawStatus as? [String: Any], let type = status["type"] as? String {
+            switch type.lowercased() {
+            case "active", "running": activityStatus = .running
+            case "idle", "notloaded", "not_loaded", "systemerror", "system_error": activityStatus = .idle
+            default: activityStatus = .unknown
+            }
+        } else {
+            activityStatus = .unknown
+        }
+
+        return CodexThreadSummary(
+            id: id,
+            updatedAt: updatedAt,
+            isArchived: archived,
+            activityStatus: activityStatus
+        )
+    }
+
+    private static func date(from value: Any?) -> Date? {
+        if let number = value as? NSNumber {
+            let raw = number.doubleValue
+            return Date(timeIntervalSince1970: raw > 10_000_000_000 ? raw / 1_000 : raw)
+        }
+        if let string = value as? String {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = formatter.date(from: string) { return date }
+            formatter.formatOptions = [.withInternetDateTime]
+            return formatter.date(from: string)
+        }
+        return nil
     }
 
     func handleNotification(_ message: [String: Any]) {

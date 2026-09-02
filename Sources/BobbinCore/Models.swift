@@ -212,7 +212,19 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     }
 
     public let id: UUID
-    public var codexThreadID: String?
+    /// The current server thread. `codexThreadIDs` retains superseded forks
+    /// until the deletion pipeline has removed them from the app-server.
+    private var primaryCodexThreadID: String?
+    public var codexThreadIDs: [String]
+    public var codexThreadID: String? {
+        get { primaryCodexThreadID }
+        set {
+            primaryCodexThreadID = newValue
+            if let newValue, !codexThreadIDs.contains(newValue) {
+                codexThreadIDs.insert(newValue, at: 0)
+            }
+        }
+    }
     public var activeTurnID: String?
     public var title: String
     public var workingDirectory: String
@@ -229,6 +241,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     public init(
         id: UUID = UUID(),
         codexThreadID: String? = nil,
+        codexThreadIDs: [String] = [],
         activeTurnID: String? = nil,
         title: String = "New thread",
         workingDirectory: String,
@@ -243,7 +256,12 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         toolCalls: [ToolCall] = []
     ) {
         self.id = id
-        self.codexThreadID = codexThreadID
+        self.primaryCodexThreadID = codexThreadID
+        var trackedIDs = codexThreadIDs
+        if let codexThreadID, !trackedIDs.contains(codexThreadID) {
+            trackedIDs.insert(codexThreadID, at: 0)
+        }
+        self.codexThreadIDs = trackedIDs
         self.activeTurnID = activeTurnID
         self.title = title
         self.workingDirectory = workingDirectory
@@ -285,6 +303,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id
         case codexThreadID
+        case codexThreadIDs
         case activeTurnID
         case title
         case workingDirectory
@@ -302,7 +321,13 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(UUID.self, forKey: .id)
-        codexThreadID = try container.decodeIfPresent(String.self, forKey: .codexThreadID)
+        let primaryID = try container.decodeIfPresent(String.self, forKey: .codexThreadID)
+        primaryCodexThreadID = primaryID
+        var trackedIDs = try container.decodeIfPresent([String].self, forKey: .codexThreadIDs) ?? []
+        if let primaryID, !trackedIDs.contains(primaryID) {
+            trackedIDs.insert(primaryID, at: 0)
+        }
+        codexThreadIDs = trackedIDs
         activeTurnID = try container.decodeIfPresent(String.self, forKey: .activeTurnID)
         title = try container.decode(String.self, forKey: .title)
         workingDirectory = try container.decode(String.self, forKey: .workingDirectory)
@@ -321,6 +346,25 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         messages = try container.decode([ChatMessage].self, forKey: .messages)
         toolCalls = try container.decodeIfPresent([ToolCall].self, forKey: .toolCalls) ?? []
     }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(primaryCodexThreadID, forKey: .codexThreadID)
+        try container.encode(codexThreadIDs, forKey: .codexThreadIDs)
+        try container.encodeIfPresent(activeTurnID, forKey: .activeTurnID)
+        try container.encode(title, forKey: .title)
+        try container.encode(workingDirectory, forKey: .workingDirectory)
+        try container.encode(model, forKey: .model)
+        try container.encode(reasoningEffort, forKey: .reasoningEffort)
+        try container.encode(reviewMode, forKey: .reviewMode)
+        try container.encode(systemPrompt, forKey: .systemPrompt)
+        try container.encode(lastConversationAt, forKey: .lastConversationAt)
+        try container.encodeIfPresent(savedAt, forKey: .savedAt)
+        try container.encode(status, forKey: .status)
+        try container.encode(messages, forKey: .messages)
+        try container.encode(toolCalls, forKey: .toolCalls)
+    }
 }
 
 public struct PersistedState: Codable, Equatable, Sendable {
@@ -329,19 +373,25 @@ public struct PersistedState: Codable, Equatable, Sendable {
     public var defaultModel: String
     public var defaultReasoningEffort: String
     public var defaultSystemPrompt: String
+    public var automaticCleanupEnabled: Bool
+    public var deletionTombstones: [ThreadDeletionTombstone]
 
     public init(
         threads: [HarnessThread] = [],
         selectedThreadID: UUID? = nil,
         defaultModel: String = HarnessThread.defaultModel,
         defaultReasoningEffort: String = HarnessThread.defaultReasoningEffort,
-        defaultSystemPrompt: String = HarnessThread.defaultSystemPrompt
+        defaultSystemPrompt: String = HarnessThread.defaultSystemPrompt,
+        automaticCleanupEnabled: Bool = true,
+        deletionTombstones: [ThreadDeletionTombstone] = []
     ) {
         self.threads = threads
         self.selectedThreadID = selectedThreadID
         self.defaultModel = defaultModel
         self.defaultReasoningEffort = defaultReasoningEffort
         self.defaultSystemPrompt = defaultSystemPrompt
+        self.automaticCleanupEnabled = automaticCleanupEnabled
+        self.deletionTombstones = deletionTombstones
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -350,6 +400,8 @@ public struct PersistedState: Codable, Equatable, Sendable {
         case defaultModel
         case defaultReasoningEffort
         case defaultSystemPrompt
+        case automaticCleanupEnabled
+        case deletionTombstones
     }
 
     public init(from decoder: Decoder) throws {
@@ -368,6 +420,82 @@ public struct PersistedState: Codable, Equatable, Sendable {
             String.self,
             forKey: .defaultSystemPrompt
         ) ?? HarnessThread.defaultSystemPrompt
+        automaticCleanupEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .automaticCleanupEnabled
+        ) ?? true
+        deletionTombstones = try container.decodeIfPresent(
+            [ThreadDeletionTombstone].self,
+            forKey: .deletionTombstones
+        ) ?? []
+    }
+}
+
+public enum ThreadDeletionReason: String, Codable, Sendable {
+    case manual
+    case expired
+    case rewrite
+    case orphaned
+}
+
+/// Content-free durable state for a server deletion which has not completed.
+/// Keeping this separate from `HarnessThread` lets Bobbin hide local content
+/// immediately while retrying a transient app-server failure.
+public struct ThreadDeletionTombstone: Codable, Equatable, Identifiable, Sendable {
+    public let id: UUID
+    public let localThreadID: UUID?
+    public var codexThreadIDs: [String]
+    public let reason: ThreadDeletionReason
+    public let requestedAt: Date
+    public var attemptCount: Int
+    public var nextRetryAt: Date?
+    public var lastErrorCode: String?
+
+    public init(
+        id: UUID = UUID(),
+        localThreadID: UUID?,
+        codexThreadIDs: [String],
+        reason: ThreadDeletionReason,
+        requestedAt: Date = Date(),
+        attemptCount: Int = 0,
+        nextRetryAt: Date? = nil,
+        lastErrorCode: String? = nil
+    ) {
+        self.id = id
+        self.localThreadID = localThreadID
+        self.codexThreadIDs = codexThreadIDs
+        self.reason = reason
+        self.requestedAt = requestedAt
+        self.attemptCount = attemptCount
+        self.nextRetryAt = nextRetryAt
+        self.lastErrorCode = lastErrorCode
+    }
+}
+
+public enum CodexThreadActivityStatus: String, Sendable {
+    case running
+    case idle
+    case unknown
+}
+
+/// The small, privacy-safe subset of a `thread/list` result needed for
+/// retention reconciliation. No title, cwd, prompt, or transcript is kept.
+public struct CodexThreadSummary: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let updatedAt: Date?
+    public let isArchived: Bool
+    public let activityStatus: CodexThreadActivityStatus
+
+    public init(
+        id: String,
+        updatedAt: Date?,
+        isArchived: Bool,
+        activityStatus: CodexThreadActivityStatus
+    ) {
+        self.id = id
+        self.updatedAt = updatedAt
+        self.isArchived = isArchived
+        self.activityStatus = activityStatus
     }
 }
 
