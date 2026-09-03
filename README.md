@@ -8,13 +8,20 @@
 
 <p align="center">Spin up a thread. Keep what matters.</p>
 
-<p align="center"><a href="https://bobbin.combinatrix.ai/">Website</a></p>
+<p align="center">
+  <a href="https://bobbin.combinatrix.ai/">Website</a> ·
+  <a href="https://github.com/combinatrix-ai/bobbin/releases/latest/download/Bobbin-v0.1.0.dmg">Download for macOS</a>
+</p>
 
 <p align="center">
   <img src="docs/images/bobbin-hero.png" width="720" alt="Bobbin menu bar icon above its thread list popover">
 </p>
 
 Bobbin is a small macOS menu bar client for the useful tasks that do not need to live forever in your main agent history. Open a thread, ask Codex, then get back to what you were doing.
+
+## Install
+
+Download the notarized [Bobbin DMG](https://github.com/combinatrix-ai/bobbin/releases/latest/download/Bobbin-v0.1.0.dmg), open it, and drag Bobbin to Applications. Bobbin requires macOS 14 or later and a locally installed Codex CLI.
 
 ## Thread lightly
 
@@ -89,7 +96,9 @@ swift test
 ./scripts/build-app.sh /path/to/output-directory
 ```
 
-The packaging script creates an ad-hoc signed `Bobbin.app`.
+The packaging script creates an ad-hoc signed `Bobbin.app`. Maintainers can run `scripts/release.sh` to create a universal Developer ID-signed and Apple-notarized DMG and ZIP.
+
+Release builds use Sparkle to check the signed `appcast.xml` attached to the latest GitHub Release once per day. The Settings menu also provides **Check for Updates…** for an immediate check.
 
 ## Icon
 
