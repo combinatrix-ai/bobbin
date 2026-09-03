@@ -6,7 +6,7 @@
 
 <p align="center"><strong>Thread lightly.</strong></p>
 
-<p align="center">Spin up a thread. Keep what matters.</p>
+<p align="center">Spin up a thread. Keep what matters. Bobbin forgets the rest.</p>
 
 <p align="center">
   <a href="https://bobbin.combinatrix.ai/">Website</a> ·
