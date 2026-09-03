@@ -8,6 +8,8 @@
 
 <p align="center">Spin up a thread. Keep what matters.</p>
 
+<p align="center"><a href="https://bobbin.combinatrix.ai/">Website</a></p>
+
 <p align="center">
   <img src="docs/images/bobbin-hero.png" width="720" alt="Bobbin menu bar icon above its thread list popover">
 </p>

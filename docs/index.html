@@ -4,8 +4,21 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="Bobbin puts quick, disposable Codex threads in your Mac menu bar.">
+  <meta name="theme-color" content="#f4f1e8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#171914" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Bobbin | Thread lightly">
+  <meta property="og:description" content="Quick, disposable Codex threads in your Mac menu bar.">
+  <meta property="og:url" content="https://bobbin.combinatrix.ai/">
+  <meta property="og:image" content="https://bobbin.combinatrix.ai/images/bobbin-hero.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Bobbin | Thread lightly">
+  <meta name="twitter:description" content="Quick, disposable Codex threads in your Mac menu bar.">
+  <meta name="twitter:image" content="https://bobbin.combinatrix.ai/images/bobbin-hero.png">
   <title>Bobbin | Thread lightly</title>
-  <link rel="stylesheet" href="shared.css">
+  <link rel="canonical" href="https://bobbin.combinatrix.ai/">
+  <link rel="icon" href="bobbin-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
   <style>
     .site-shell {
       overflow: hidden;
@@ -244,7 +257,7 @@
       bottom: -180px;
       width: 440px;
       height: 440px;
-      background: url("../Resources/Icon/BobbinMark.svg") center / contain no-repeat;
+      background: url("bobbin-mark.svg") center / contain no-repeat;
       content: "";
       opacity: 0.055;
       pointer-events: none;
@@ -357,29 +370,29 @@
   <div class="site-shell">
     <nav class="site-nav" aria-label="Primary navigation">
       <a class="site-brand" href="#top">
-        <img class="brand-mark" src="../Resources/Icon/BobbinMark.svg" alt="">
+        <img class="brand-mark" src="bobbin-mark.svg" alt="">
         <span>Bobbin</span>
       </a>
       <div class="site-nav__links">
         <a href="#why">Why Bobbin</a>
         <a href="#control">Control</a>
-        <a class="nav-cta" href="#get">Get Bobbin</a>
+        <a class="nav-cta" href="https://github.com/combinatrix-ai/bobbin">GitHub</a>
       </div>
     </nav>
 
     <main class="site-main" id="top">
       <section class="site-hero" aria-labelledby="hero-title">
         <div>
-          <img class="hero-mark" src="../Resources/Icon/BobbinMark.svg" alt="Bobbin mark">
+          <img class="hero-mark" src="bobbin-mark.svg" alt="Bobbin mark">
           <h1 id="hero-title">Thread <span>lightly.</span></h1>
           <p class="site-hero__lead">Quick, disposable Codex threads in your Mac menu bar. Keep the useful ones. Let the rest fade away.</p>
           <div class="button-row">
-            <a class="button" href="#get">Get Bobbin</a>
+            <a class="button" href="https://github.com/combinatrix-ai/bobbin">View on GitHub</a>
             <a class="button secondary" href="#why">See how it works</a>
           </div>
         </div>
         <div class="screenshot-slot has-product-shot">
-          <img class="product-shot" src="../docs/images/bobbin-menubar-demo.svg" alt="Bobbin creates a thread, uses tools, answers, and saves it from the menu bar">
+          <img class="product-shot" src="images/bobbin-menubar-demo.svg" alt="Bobbin creates a thread, uses tools, answers, and saves it from the menu bar">
         </div>
       </section>
 
@@ -409,13 +422,13 @@
           <h2 class="section-heading" id="control-title">Tune every thread to the task.</h2>
           <p class="section-lead">Choose the model, reasoning effort, and trust for each thread. Give new threads the system prompt they need.</p>
         </div>
-        <img class="control-demo" src="../docs/images/bobbin-controls-demo.svg" alt="Bobbin cycles through model, reasoning, trust, and system prompt settings">
+        <img class="control-demo" src="images/bobbin-controls-demo.svg" alt="Bobbin cycles through model, reasoning, trust, and system prompt settings">
       </section>
 
       <section class="section closing" id="get" aria-labelledby="get-title">
         <h2 id="get-title">Spin up a thread. Keep what matters.</h2>
         <div class="button-row">
-          <a class="button" href="#top">Get Bobbin</a>
+          <a class="button" href="https://github.com/combinatrix-ai/bobbin">View on GitHub</a>
           <a class="button secondary" href="#control">See controls</a>
         </div>
       </section>
@@ -423,7 +436,7 @@
 
     <footer class="site-footer">
       <span>Bobbin for macOS 14 and later</span>
-      <span>A tiny Codex app-server client</span>
+      <span>Made by <a href="https://combinatrix.ai/">combinatrix.ai</a></span>
     </footer>
   </div>
 </body>
