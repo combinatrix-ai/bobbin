@@ -414,6 +414,10 @@ private struct SettingsMenu: View {
                 }
                 Text("Auth: \(authenticationLabel)")
                 Divider()
+                Button("Check for Updates…") {
+                    UpdaterController.shared.checkForUpdates()
+                }
+                .disabled(!UpdaterController.shared.canCheckForUpdates)
                 Button("Quit Bobbin") {
                     NSApplication.shared.terminate(nil)
                 }

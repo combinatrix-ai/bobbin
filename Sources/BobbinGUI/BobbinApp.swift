@@ -34,6 +34,8 @@ struct BobbinApp: App {
     private let demoCleanup: DemoRootCleanup?
 
     init() {
+        // Constructing the shared updater starts Sparkle's scheduled checks.
+        _ = UpdaterController.shared
         let options = RuntimeOptions.fromProcess()
         do {
             if options.demoMode {

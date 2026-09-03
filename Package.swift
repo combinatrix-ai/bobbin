@@ -11,12 +11,19 @@ let package = Package(
         .executable(name: "Bobbin", targets: ["BobbinGUI"]),
         .executable(name: "bobbin-icon", targets: ["BobbinIconTool"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0")
+    ],
     targets: [
         .target(name: "BobbinCore"),
         .target(name: "BobbinIcon"),
         .executableTarget(
             name: "BobbinGUI",
-            dependencies: ["BobbinCore", "BobbinIcon"]
+            dependencies: [
+                "BobbinCore",
+                "BobbinIcon",
+                .product(name: "Sparkle", package: "Sparkle")
+            ]
         ),
         .executableTarget(
             name: "BobbinIconTool",

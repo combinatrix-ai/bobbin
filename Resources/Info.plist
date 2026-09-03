@@ -28,5 +28,13 @@
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>SUFeedURL</key>
+    <string>https://github.com/combinatrix-ai/bobbin/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>u+Q8/UjDUddA0GV7hkaAaLr6erPJohhGGopaFdv+x2I=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
 </dict>
 </plist>
