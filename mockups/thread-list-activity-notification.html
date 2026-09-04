@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bobbin: thread rows, working + new reply</title>
+<style>
+  :root {
+    --page:#f4f1e8; --chrome:#f5f5f2; --ink:#252820; --muted:#6f736d; --muted-2:#8b8e88;
+    --hairline:rgba(37,40,32,.09); --hairline-2:rgba(37,40,32,.16); --accent:#849e1f; --bad:#b5482f;
+    --bar-light:#e6e5e2; --bar-dark:#232325;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; padding:48px 28px 96px; background:var(--page); color:var(--ink);
+         font:13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1180px; margin:0 auto; }
+  header { max-width:70ch; margin-bottom:30px; }
+  h1 { margin:0 0 10px; font-size:21px; font-weight:600; letter-spacing:-.01em; }
+  h2 { margin:46px 0 4px; font-size:15px; font-weight:600; }
+  h2 + p { margin:0 0 14px; color:var(--muted); max-width:72ch; }
+  header p { margin:0 0 6px; color:var(--muted); }
+  code { font:11px ui-monospace, SFMono-Regular, Menlo, monospace; color:var(--ink); }
+  .note { font-size:10.5px; color:var(--muted); margin-top:8px; max-width:50ch; line-height:1.5; }
+  .note b { color:var(--ink); }
+  .tag { display:inline-block; font-size:9.5px; letter-spacing:.06em; text-transform:uppercase;
+         padding:2px 6px; border-radius:4px; border:1px solid var(--hairline-2); color:var(--muted); vertical-align:middle; }
+  .tag.yes { border-color:var(--accent); color:var(--accent); }
+  .tag.no  { border-color:var(--bad); color:var(--bad); }
+  .toolbar { position:sticky; top:0; z-index:3; display:flex; flex-wrap:wrap; gap:18px; align-items:center;
+             padding:8px 0 10px; margin-bottom:6px; background:var(--page); }
+  .toolbar label { display:inline-flex; gap:6px; align-items:center; font-size:12px; color:var(--muted); }
+  .toolbar button { font:12px inherit; padding:3px 10px; border-radius:6px; border:1px solid var(--hairline-2);
+                    background:var(--chrome); color:var(--ink); cursor:pointer; }
+  .toolbar button:hover { background:var(--hover-page, rgba(37,40,32,.05)); }
+
+  /* ---------- the popover, in its own light/dark scope ---------- */
+  .pop { --pi:#1d2119; --p2:rgba(29,33,25,.55); --p3:rgba(29,33,25,.36); --pa:#869e1e; --pfield:#fff;
+         --pbg:#f2f1ec; --phov:rgba(29,33,25,.05); --pline:rgba(29,33,25,.09); --pline2:rgba(29,33,25,.13);
+         --pfocus:#3b7ded;
+         width:392px; max-width:100%; background:var(--pbg); color:var(--pi); border:1px solid var(--pline2);
+         border-radius:10px; overflow:hidden; box-shadow:0 12px 34px rgba(30,32,24,.14); flex:none; }
+  .pop.dark { --pi:#f2f0e8; --p2:rgba(242,240,232,.58); --p3:rgba(242,240,232,.38); --pa:#b8d356; --pfield:#34372f;
+              --pbg:#2a2c26; --phov:rgba(242,240,232,.07); --pline:rgba(242,240,232,.1); --pline2:rgba(242,240,232,.16);
+              --pfocus:#6aa0ff; box-shadow:0 12px 34px rgba(0,0,0,.4); }
+  .pop, .pop * { font-family:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif; }
+  .composer { margin:8px 10px 6px; border:1px solid var(--pline); background:var(--pfield); border-radius:13px;
+              display:flex; align-items:center; gap:8px; padding:5px 5px 5px 11px; min-height:42px; }
+  .composer .ph { flex:1; font-size:12px; color:var(--p3); }
+  .composer .send { width:28px; height:28px; border-radius:50%; display:grid; place-items:center; color:var(--p3); }
+  .phead { display:flex; align-items:center; height:24px; padding:0 13px; font-size:11px; color:var(--p2); gap:5px; }
+  .phead .sp { flex:1; }
+  .phead svg { display:block; }
+  .rows { padding:4px 8px; display:grid; gap:1px; }
+  .sect { margin-top:8px; border-top:1px solid var(--pline); padding-top:9px; }
+  .sect .lab { font-size:10px; font-weight:600; letter-spacing:.02em; color:var(--p3); padding:0 8px 4px 21px; }
+  .sect.legacy .lab { padding-left:8px; }
+
+  .trow { display:flex; align-items:center; border-radius:8px; font-size:12px; position:relative; }
+  .trow .main { flex:1 1 auto; min-width:0; display:flex; align-items:center; gap:7px; padding:8px 0 8px 8px; }
+  .trow .slot { flex:none; width:6px; height:6px; display:grid; place-items:center; }
+  .trow.legacy .slot:empty { display:none; }           /* today: dot only when needed → title shifts */
+  .trow .t { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .trow.unseen .t { font-weight:600; }
+  .trow .when { margin-left:auto; flex:none; padding-left:3px; font-size:10px; color:var(--p3); font-variant-numeric:tabular-nums; }
+  .trow .star { flex:none; width:28px; height:28px; display:grid; place-items:center; color:var(--p2); opacity:0; }
+  .trow.saved .star { opacity:1; color:var(--pa); }
+  .trow.hov { background:var(--phov); }
+  .trow.hov .star { opacity:1; }
+  .trow.focus { outline:2px solid var(--pfocus); outline-offset:-2px; }
+  .trow.aged { opacity:.6; }
+  .dot { width:6px; height:6px; border-radius:50%; display:block; }
+  .dot.run { background:var(--pa); animation:breath 3s ease-in-out infinite; }
+  .dot.run.static { animation:none; }
+  .dot.new { background:var(--pi); }
+  .dot.in { animation:dot-in .18s ease-out both; }
+  .dot.out { animation:dot-out .12s ease-in both; }
+  @keyframes breath { 0%,100% { opacity:1; } 50% { opacity:.3; } }
+  @keyframes dot-in { from { opacity:0; transform:scale(.6); } to { opacity:1; transform:none; } }
+  @keyframes dot-out { to { opacity:0; } }
+  body.no-motion .dot.run { animation:none; }
+  body.no-motion .dot.in, body.no-motion .dot.out { animation-duration:.12s; transform:none !important; }
+  body.no-motion .dot.in { animation-name:dot-fade-in; }
+  @keyframes dot-fade-in { from { opacity:0; } to { opacity:1; } }
+  @media (prefers-reduced-motion: reduce) { .dot.run { animation:none; } }
+
+  /* menu bar strip above each popover */
+  .bar { height:24px; display:flex; align-items:center; justify-content:flex-end; gap:4px; padding:0 10px;
+         border-radius:6px; font-size:12.5px; width:392px; max-width:100%; margin-bottom:8px; }
+  .bar.light { background:var(--bar-light); color:#000; } .bar.dark { background:var(--bar-dark); color:#fff; }
+  .bar .it { display:grid; place-items:center; height:22px; min-width:28px; padding:0 4px; border-radius:5px; }
+  .bar.light .it.open { background:rgba(0,0,0,.12); } .bar.dark .it.open { background:rgba(255,255,255,.18); }
+  .bar .clock { margin-left:6px; font-variant-numeric:tabular-nums; }
+  svg.mark { display:block; overflow:visible; }
+  .core.breath { animation:breath 3s ease-in-out infinite; }
+  body.no-motion .core.breath { animation:none; opacity:.5; }
+  @media (prefers-reduced-motion: reduce) { .core.breath { animation:none; opacity:.5; } }
+
+  /* layouts */
+  .pair { display:flex; gap:26px; flex-wrap:wrap; align-items:flex-start; }
+  .col { display:flex; flex-direction:column; }
+  .callouts { display:grid; gap:0; font-size:11px; color:var(--muted); max-width:34ch; align-self:center; }
+  .callouts div { padding:6px 0; border-bottom:1px solid var(--hairline); }
+  .callouts b { color:var(--ink); font-weight:600; }
+  .callouts .k { display:inline-block; min-width:22px; font:10px ui-monospace, Menlo, monospace; color:var(--bad); }
+  .keyed { position:absolute; left:-24px; top:50%; transform:translateY(-50%); font:10px ui-monospace, Menlo, monospace; color:var(--bad); }
+  .rows.keyed-rows .trow { overflow:visible; }
+
+  .anatomy { display:grid; grid-template-columns:auto 1fr; gap:26px; align-items:start; }
+  .zoomrow { position:relative; width:392px; max-width:100%; transform-origin:top left; }
+  .zoomwrap { width:100%; overflow-x:auto; }
+  .zoomwrap .pop { width:392px; }
+  .spec { display:grid; grid-template-columns:max-content 1fr; gap:4px 14px; font-size:12px; margin:0; }
+  .spec dt { color:var(--muted); } .spec dd { margin:0; }
+
+  .cmp { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:16px; }
+  .card { border:1px solid var(--hairline); border-radius:12px; background:var(--chrome); padding:12px; }
+  .card h3 { margin:0 0 3px; font-size:12px; font-weight:600; }
+  .card p { margin:0; font-size:10.5px; color:var(--muted); }
+  .card ul { margin:8px 0 0; padding-left:16px; font-size:11px; color:var(--muted); }
+  .card li { margin:2px 0; } .card li b { color:var(--ink); font-weight:600; }
+  .card .pop { width:100%; box-shadow:none; margin:8px 0 10px; }
+  .sim { display:flex; gap:8px; align-items:center; margin:0 0 12px; flex-wrap:wrap; }
+  .sim button { font:12px inherit; padding:4px 11px; border-radius:6px; border:1px solid var(--hairline-2);
+                background:var(--chrome); color:var(--ink); cursor:pointer; }
+  .sim button.primary { background:var(--ink); color:var(--page); border-color:var(--ink); }
+  .sim .st { font-size:11px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .guide { position:absolute; top:0; bottom:0; width:0; border-left:1px dashed var(--bad); pointer-events:none; opacity:.7; }
+
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  th, td { text-align:left; vertical-align:top; padding:7px 10px; border-bottom:1px solid var(--hairline); }
+  th { font-size:10px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted-2); font-weight:600; }
+  td code { white-space:nowrap; }
+  .qs { border-left:3px solid var(--accent); padding:8px 14px; background:var(--chrome); border-radius:0 10px 10px 0; max-width:74ch; }
+  .qs p { margin:5px 0; font-size:12px; }
+
+  @media (prefers-color-scheme: dark) {
+    :root { --page:#171914; --chrome:#22241d; --ink:#f2f0e8; --muted:#a9ad9f; --muted-2:#83877c;
+            --hairline:rgba(242,240,232,.11); --hairline-2:rgba(242,240,232,.2); --accent:#b8d453; --bad:#e0785d;
+            --hover-page:rgba(242,240,232,.07); }
+  }
+  @media (max-width: 900px) { .anatomy { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Thread rows: the same two meanings, carried inside</h1>
+    <p>The menu bar now says <em>working</em> (breathing core) and <em>something came back</em> (lower-right dot).
+       Opening Bobbin should answer <em>which thread</em> with the same vocabulary, not a second one. Each row gets a
+       6 pt mark in a fixed leading slot: <b>accent, breathing</b> while that thread runs; <b>ink, still</b> plus a
+       semibold title while it holds a reply you have not opened.</p>
+    <p>This is the existing <code>ThreadRow</code> with three changes: the slot is always reserved so titles never
+       shift, the running dot breathes in step with the menu-bar core, and accessibility moves state into the row’s
+       value. Nothing else in the popover moves.</p>
+  </header>
+
+  <div class="toolbar">
+    <label><input type="checkbox" id="motion" checked> Motion (uncheck to preview Reduce Motion)</label>
+    <label><input type="checkbox" id="staticrun"> Alternative: running dot static even with motion on</label>
+    <button id="hovertoggle" type="button">Toggle hover on the “Draft release notes” row</button>
+  </div>
+
+  <h2>1 · The list at 392 pt, light and dark</h2>
+  <p>Menu bar above each is in the matching state (working + new reply, popover open). Rows top to bottom: running · new reply, hovered · failed, new reply · quiet · quiet, 5 days old · SAVED: running · new reply · quiet, keyboard-focused.</p>
+  <div class="pair">
+    <div class="col">
+      <div class="bar light"><span class="it open" data-mark="working unseen"></span><span class="clock">Thu 14:32</span></div>
+      <div class="pop light" data-list="main"></div>
+    </div>
+    <div class="col">
+      <div class="bar dark"><span class="it open" data-mark="working unseen"></span><span class="clock">Thu 14:32</span></div>
+      <div class="pop dark" data-list="main"></div>
+    </div>
+    <div class="callouts">
+      <div><b>Running</b> · accent dot breathing 1.0 → 0.3 → 1.0 over 3.0 s, same clock as the menu-bar core. Metadata says “Running”, so the dot is never the only cue.</div>
+      <div><b>New reply</b> · ink dot, still, and the title turns semibold. Monochrome on purpose: it is the menu-bar dot, carried inside.</div>
+      <div><b>Failed, new reply</b> · the same ink dot; the metadata says “Failed”. One mark means “look”, the row says why. No red.</div>
+      <div><b>Quiet</b> · the slot is empty but still there. Titles sit in one column whether or not a neighbour is flagged.</div>
+      <div><b>Aged</b> · the retention fade applies to the whole row, dot included. A flagged row is by definition fresh, so it is never faded.</div>
+      <div><b>Saved</b> · state stays in the leading slot, the star stays trailing. Two accent marks on a saved running row are fine: accent means <em>working, or kept</em>, and only one of them breathes.</div>
+      <div><b>Hover / focus</b> · hover tints the row and reveals the star; the focus ring is the system’s. Neither touches the mark, and neither clears it.</div>
+    </div>
+  </div>
+
+  <h2>2 · Reserved slot vs today’s conditional dot</h2>
+  <p>Same timeline on both lists: a thread finishes while the list is open, then you open it. Watch the title column. Press Play, or step it.</p>
+  <div class="sim">
+    <button class="primary" id="play" type="button">Play timeline</button>
+    <button data-step="running" type="button">Running</button>
+    <button data-step="finished" type="button">Finishes (unseen)</button>
+    <button data-step="opened" type="button">You open it</button>
+    <span class="st" id="simstate">state: running</span>
+  </div>
+  <div class="cmp">
+    <div class="card">
+      <h3>Reserved slot <span class="tag yes">proposed</span></h3>
+      <p>Every row indents 13 pt for the slot. Titles form one column; the mark appears and clears in place.</p>
+      <div class="pop light" data-list="sim" data-mode="reserved"></div>
+      <ul>
+        <li><b>Nothing jumps.</b> Finishing, opening, or a neighbour’s state change never moves your text.</li>
+        <li><b>The marks line up</b> vertically, so scanning “anything new?” is one glance down the gutter.</li>
+        <li><b>Cost is 13 pt of leading indent</b> on a 376 pt row, and the SAVED label moves to the same column.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Conditional (today) <span class="tag no">rejected</span></h3>
+      <p>The dot is inserted only when needed, so a title shifts 13 pt each time state changes.</p>
+      <div class="pop light" data-list="sim" data-mode="legacy"></div>
+      <ul>
+        <li><b>Titles shift left when you open a thread</b>, i.e. exactly when your eye is on that row.</li>
+        <li><b>Rows are ragged</b> once any thread is flagged; quiet titles start 13 pt left of flagged ones.</li>
+        <li>The extra 13 pt saved on quiet rows never matters at this width.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>3 · Anatomy at 3×</h2>
+  <p>Points in the real row. Everything not listed is unchanged from <code>ThreadRow</code> today.</p>
+  <div class="anatomy">
+    <div class="zoomwrap"><div class="zoomrow" style="width:392px;height:auto">
+      <div class="pop light" data-list="anatomy" style="transform:scale(3);transform-origin:top left;width:392px"></div>
+    </div></div>
+    <dl class="spec">
+      <dt>Row</dt><dd>8 pt leading / vertical padding, 8 pt radius, 5 % hover tint — unchanged.</dd>
+      <dt>Slot</dt><dd>6 × 6 pt, always laid out, followed by the existing 7 pt gap. Title x = 21 pt from the row edge on every row.</dd>
+      <dt>Running dot</dt><dd>⌀ 6 pt, <code>harnessAccent</code>, opacity 1.0 → 0.3 → 1.0, 3.0 s ease-in-out. Phase shared with <code>MenuBarAnimation.breathingOpacity</code> so several running rows and the status item breathe together.</dd>
+      <dt>New-reply dot</dt><dd>⌀ 6 pt, <code>Color.primary</code>, no motion. Title weight 600 instead of 500.</dd>
+      <dt>Transitions</dt><dd>running → new: accent dot crosses to ink in 180 ms, weight switches at the midpoint. New → cleared: dot fades 120 ms. Metadata text swaps without animation, as today.</dd>
+      <dt>Reduce Motion</dt><dd>running dot rests at full accent (the word “Running” already separates it from quiet). Enter/exit are 120 ms fades, no scale.</dd>
+      <dt>Star</dt><dd>28 × 28 pt trailing button — unchanged. Shown on hover/focus, or always (filled, accent) when saved.</dd>
+      <dt>SAVED label</dt><dd>moves from 8 pt to 21 pt leading to sit on the title column.</dd>
+    </dl>
+  </div>
+
+  <h2>4 · Why the running dot breathes, and how little</h2>
+  <p>The list is on screen only while the popover is open, so the cue can be quieter than the menu bar’s, not louder.</p>
+  <div class="cmp">
+    <div class="card">
+      <h3>Breathing accent dot <span class="tag yes">chosen</span></h3>
+      <div class="pop light" data-list="motion-a"></div>
+      <ul>
+        <li><b>Same breath, same clock.</b> 20 cycles a minute, in phase with the core in the menu bar. Two things pulsing in step read as one system.</li>
+        <li><b>Confined to 6 pt.</b> No spinner, no shimmer along the title, no progress bar. It registers when you look at the gutter.</li>
+        <li><b>Never colour-only.</b> Metadata reads “Running”; VoiceOver reads it too.</li>
+        <li><b>Degrades to today’s row.</b> Reduce Motion is simply the static accent dot Bobbin already ships.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3>Static accent dot only <span class="tag">alternative</span></h3>
+      <div class="pop light" data-list="motion-b"></div>
+      <ul>
+        <li><b>Also acceptable.</b> Toggle it in the toolbar. It is exactly the current row.</li>
+        <li><b>What it loses:</b> the link to the menu-bar breath, and the felt difference between “running” and “kept” when both are accent on a saved row.</li>
+        <li><b>What it saves:</b> one 12 fps timer while the list is open with a running thread. Not a real cost.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h2>5 · When the row mark appears and clears</h2>
+  <p>Unchanged from the agreed store semantics: <code>hasUnseenResult</code> flips only on a real running → done/failed transition, and only opening that conversation clears it.</p>
+  <table>
+    <thead><tr><th>Event</th><th>Row</th><th>Menu bar</th></tr></thead>
+    <tbody>
+      <tr><td>You send a message (new or existing thread)</td><td>accent dot starts breathing; any ink dot on that row is gone</td><td>breath (if not already)</td></tr>
+      <tr><td>Thread finishes while its conversation is on screen</td><td>plain row, metadata “Just now”</td><td>no dot</td></tr>
+      <tr><td>Thread finishes while the popover is closed, or open on the list / another thread</td><td>accent → ink, title semibold. Happens in place if you are looking at the list.</td><td>dot appears</td></tr>
+      <tr><td>You stop a thread</td><td>plain row (no mark: you were there)</td><td>breath settles</td></tr>
+      <tr><td>You open the popover, hover a row, focus a row, scroll</td><td>no change</td><td>no change</td></tr>
+      <tr><td>You open a flagged thread</td><td>ink dot fades, title returns to medium</td><td>dot fades when none remain</td></tr>
+      <tr><td>You save a flagged or running thread</td><td>row moves to SAVED with its mark intact</td><td>no change</td></tr>
+      <tr><td>You delete a flagged thread</td><td>row gone</td><td>same</td></tr>
+      <tr><td>App relaunch</td><td>ink dots restore from state; no running rows, so nothing breathes</td><td>dot restores</td></tr>
+    </tbody>
+  </table>
+  <p class="note">Sorting is untouched: rows keep their current order. A flagged row is not hoisted to the top; the mark is enough, and hoisting would move text the moment you are about to click it.</p>
+
+  <h2>6 · Accessibility</h2>
+  <p>The row stays one button. Identity goes in the label, state in the value, so VoiceOver reads “Draft release notes, button, new reply, 2 minutes ago” and the breath never touches the accessibility tree.</p>
+  <table>
+    <thead><tr><th>Row</th><th>Label</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>quiet</td><td>“Refactor the parser”</td><td>“1 hour ago” / “2 days left”</td></tr>
+      <tr><td>running</td><td>“Refactor the parser”</td><td>“Running”</td></tr>
+      <tr><td>new reply</td><td>“Draft release notes”</td><td>“New reply, 2 minutes ago”</td></tr>
+      <tr><td>failed, new reply</td><td>“Why does the build warn”</td><td>“Failed, new reply, 9 minutes ago”</td></tr>
+      <tr><td>failed, seen</td><td>“Why does the build warn”</td><td>“Failed, 9 minutes ago”</td></tr>
+      <tr><td>saved + running</td><td>“Weekly digest, saved”</td><td>“Running”</td></tr>
+    </tbody>
+  </table>
+  <p class="note"><b>Dots</b> are <code>accessibilityHidden</code>; they carry no label of their own (today the running dot has one that the row label already overrides). <b>Star</b> keeps “Save thread” / “Saved”. <b>SAVED</b> header gets <code>.isHeader</code>. <b>Reduce Motion</b> follows the same environment value as the menu bar. <b>Differentiate Without Color</b> needs nothing: running has the word, new has the weight. <b>Increase Contrast</b>: both dot colours are already full-strength primary / accent.</p>
+
+  <h2>7 · Contract</h2>
+  <div class="qs">
+    <p><b>1. Duplicate the menu-bar states in the list?</b> Yes. Working = accent dot, breathing. Unseen = ink dot + semibold title. Failure shares the unseen dot; the metadata says “Failed”.</p>
+    <p><b>2. Reserved slot.</b> Always laid out, 6 pt + 7 pt gap, on every row including saved ones. Titles never shift.</p>
+    <p><b>3. Motion.</b> Only the running dot moves: opacity 1.0 → 0.3, 3.0 s, shared phase with the menu bar. No spinner, no motion on the ink dot. Reduce Motion: static dots, 120 ms fades.</p>
+    <p><b>4. Saved rows</b> compose without special cases: mark leading, star trailing, no retention fade.</p>
+    <p><b>5. Clearing</b> is unchanged: opening that conversation clears it; opening the list, hovering, focusing, or scrolling does not. Stop never flags.</p>
+    <p><b>6. Accessibility</b> as in section 6: label = title (+ “saved”), value = state (+ age), dots hidden.</p>
+  </div>
+</div>
+
+<script>
+  /* ---- menu-bar mark (geometry from menubar-activity-notification.html) ---- */
+  const ARCS = 'M14.679 6.706A6.125 6.125 0 0 1 6.706 14.679M3.321 11.294A6.125 6.125 0 0 1 11.294 3.321';
+  let uid = 0;
+  function mark(state) {
+    const s = new Set(state.split(/\s+/)); const id = 'm' + (uid++);
+    const badge = s.has('unseen');
+    let out = `<svg class="mark" width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">`;
+    if (badge) out += `<mask id="${id}"><rect width="18" height="18" fill="#fff"/><circle cx="14.5" cy="14.5" r="3.5" fill="#000"/></mask>`;
+    out += `<g ${badge ? `mask="url(#${id})"` : ''}><path d="${ARCS}" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="round"/>`;
+    out += `<rect class="core${s.has('working') ? ' breath' : ''}" x="6.75" y="6.75" width="4.5" height="4.5" rx="0.958" fill="currentColor"/></g>`;
+    if (badge) out += `<circle cx="14.5" cy="14.5" r="2.5" fill="currentColor"/>`;
+    return out + `</svg>`;
+  }
+  document.querySelectorAll('[data-mark]').forEach(el => el.innerHTML = mark(el.dataset.mark));
+
+  /* ---- popover pieces ---- */
+  const ICON = {
+    folder: `<svg width="12" height="10" viewBox="0 0 12 10" fill="none" stroke="currentColor" stroke-width="1.1"><path d="M1 2.2a1 1 0 0 1 1-1h2.4l1.1 1.2H10a1 1 0 0 1 1 1V8a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1z"/></svg>`,
+    gear: `<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.1"><circle cx="6" cy="6" r="1.7"/><path d="M6 1v1.4M6 9.6V11M1 6h1.4M9.6 6H11M2.5 2.5l1 1M8.5 8.5l1 1M9.5 2.5l-1 1M3.5 8.5l-1 1"/></svg>`,
+    star: (fill) => `<svg width="13" height="13" viewBox="0 0 13 13" fill="${fill ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M6.5 1.2l1.6 3.3 3.6.5-2.6 2.5.6 3.6L6.5 9.4 3.3 11.1l.6-3.6L1.3 5l3.6-.5z"/></svg>`,
+    send: `<svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6.5 11V2.5M3 6l3.5-3.5L10 6"/></svg>`
+  };
+  const t0 = performance.now();
+  function phase() { return (-((performance.now() - t0) / 1000) % 3).toFixed(3) + 's'; }
+  function dotFor(r, anim) {
+    if (r.state === 'running') return `<span class="dot run${anim ? ' in' : ''}" style="animation-delay:${phase()}"></span>`;
+    if (r.state === 'unseen' || r.state === 'failed-unseen') return `<span class="dot new${anim ? ' in' : ''}"></span>`;
+    return '';
+  }
+  function meta(r) {
+    if (r.state === 'running') return 'Running';
+    if (r.state === 'failed-unseen' || r.state === 'failed') return 'Failed · ' + r.age;
+    return r.age;
+  }
+  function row(r, mode) {
+    const cls = ['trow', mode === 'legacy' ? 'legacy' : '', r.state === 'unseen' || r.state === 'failed-unseen' ? 'unseen' : '',
+                 r.saved ? 'saved' : '', r.hov ? 'hov' : '', r.focus ? 'focus' : '', r.aged ? 'aged' : ''].filter(Boolean).join(' ');
+    return `<div class="${cls}" data-id="${r.id || ''}">
+      <div class="main"><span class="slot">${dotFor(r)}</span><span class="t">${r.title}</span><span class="when">${meta(r)}</span></div>
+      <span class="star">${ICON.star(!!r.saved)}</span></div>`;
+  }
+  function popover({rows, saved = [], mode = 'reserved', chrome = true}) {
+    let h = '';
+    if (chrome) h += `<div class="composer"><span class="ph">Ask anything…</span><span class="send">${ICON.send}</span></div>
+      <div class="phead">${ICON.folder}<span>tiny-harness-gui</span><span class="sp"></span>${ICON.gear}</div>`;
+    h += `<div class="rows">${rows.map(r => row(r, mode)).join('')}`;
+    if (saved.length) h += `<div class="sect ${mode}"><div class="lab">SAVED</div>${saved.map(r => row(r, mode)).join('')}</div>`;
+    return h + `</div>`;
+  }
+
+  const MAIN = {
+    rows: [
+      {title:'Refactor the parser', state:'running'},
+      {title:'Draft release notes', state:'unseen', age:'2m ago', hov:true, id:'hovrow'},
+      {title:'Why does the build warn about Sparkle', state:'failed-unseen', age:'9m ago'},
+      {title:'Rename the CLI flags', state:'quiet', age:'1h ago'},
+      {title:'Summarise the retro', state:'quiet', age:'2d left', aged:true},
+    ],
+    saved: [
+      {title:'Weekly digest', state:'running', saved:true},
+      {title:'Migration checklist', state:'unseen', age:'14m ago', saved:true},
+      {title:'Release runbook', state:'quiet', age:'3d ago', saved:true, focus:true},
+    ]
+  };
+  document.querySelectorAll('[data-list="main"]').forEach(el => el.innerHTML = popover(MAIN));
+  document.querySelectorAll('[data-list="anatomy"]').forEach(el => el.innerHTML = popover({chrome:false, rows:[
+    {title:'Refactor the parser', state:'running'},
+    {title:'Draft release notes', state:'unseen', age:'2m ago', hov:true},
+    {title:'Rename the CLI flags', state:'quiet', age:'1h ago'}]}));
+  document.querySelectorAll('[data-list="motion-a"]').forEach(el => el.innerHTML = popover({chrome:false, rows:[
+    {title:'Refactor the parser', state:'running'}, {title:'Rename the CLI flags', state:'quiet', age:'1h ago'}]}));
+  document.querySelectorAll('[data-list="motion-b"]').forEach(el => {
+    el.innerHTML = popover({chrome:false, rows:[{title:'Refactor the parser', state:'running'}, {title:'Rename the CLI flags', state:'quiet', age:'1h ago'}]});
+    el.querySelectorAll('.dot.run').forEach(d => d.classList.add('static'));
+  });
+  // anatomy: give the scaled block real height
+  const zr = document.querySelector('.zoomrow');
+  if (zr) { const p = zr.querySelector('.pop'); requestAnimationFrame(() => { zr.style.height = (p.offsetHeight * 3) + 'px'; zr.style.width = (392*3) + 'px'; }); }
+
+  /* ---- simulation: reserved vs legacy ---- */
+  const SIMROWS = (state) => [
+    {title:'Draft release notes', state:'quiet', age:'12m ago'},
+    {title:'Refactor the parser', state, age:'Just now', id:'simrow'},
+    {title:'Rename the CLI flags', state:'quiet', age:'1h ago'},
+  ];
+  const sims = [...document.querySelectorAll('[data-list="sim"]')];
+  let simState = 'running';
+  function renderSim(state, from) {
+    sims.forEach(el => {
+      const mode = el.dataset.mode;
+      el.innerHTML = popover({chrome:false, rows:SIMROWS(state === 'opened' ? 'quiet' : state === 'finished' ? 'unseen' : 'running'), mode});
+      if (from && state !== from) {
+        const d = el.querySelector('[data-id="simrow"] .dot'); if (d) d.classList.add('in');
+      }
+      // dashed guide at the proposed title column, to make any shift visible
+      const g = document.createElement('div'); g.className = 'guide'; g.style.left = '29px'; el.style.position = 'relative'; el.appendChild(g);
+    });
+    document.getElementById('simstate').textContent = 'state: ' + state;
+    simState = state;
+  }
+  renderSim('running');
+  document.querySelectorAll('[data-step]').forEach(b => b.addEventListener('click', () => renderSim(b.dataset.step, simState)));
+  let timer = null;
+  document.getElementById('play').addEventListener('click', () => {
+    clearTimeout(timer); renderSim('running', simState);
+    timer = setTimeout(() => { renderSim('finished', 'running'); timer = setTimeout(() => renderSim('opened', 'finished'), 2200); }, 2200);
+  });
+
+  /* ---- toolbar ---- */
+  const cb = document.getElementById('motion');
+  const rm = matchMedia('(prefers-reduced-motion: reduce)');
+  const applyMotion = () => document.body.classList.toggle('no-motion', !cb.checked);
+  cb.checked = !rm.matches; applyMotion(); cb.addEventListener('change', applyMotion);
+  const sr = document.getElementById('staticrun');
+  sr.addEventListener('change', () => document.querySelectorAll('[data-list="main"] .dot.run, [data-list="sim"] .dot.run, [data-list="anatomy"] .dot.run')
+    .forEach(d => d.classList.toggle('static', sr.checked)));
+  document.getElementById('hovertoggle').addEventListener('click', () =>
+    document.querySelectorAll('[data-id="hovrow"]').forEach(r => r.classList.toggle('hov')));
+</script>
+</body>
+</html>
