@@ -341,6 +341,9 @@ private struct SettingsMenu: View {
     @ObservedObject var controller: HarnessController
     let openSystemPrompt: () -> Void
 
+    @StateObject private var launchAtLogin = LaunchAtLoginController(
+        service: SystemLaunchAtLoginService()
+    )
     @State private var showingCleanupConfirmation = false
     @State private var awaitingCleanupScan = false
 
@@ -379,6 +382,19 @@ private struct SettingsMenu: View {
                 Divider()
                 Button("System prompt…", action: openSystemPrompt)
                 if !controller.isDemoMode {
+                    Toggle(
+                        "Launch at Login",
+                        isOn: Binding(
+                            get: { launchAtLogin.isEnabled },
+                            set: { launchAtLogin.setEnabled($0) }
+                        )
+                    )
+                    if launchAtLogin.requiresApproval {
+                        Text("Launch at Login needs approval")
+                        Button("Open Login Items Settings…") {
+                            SystemLaunchAtLoginService.openSystemSettings()
+                        }
+                    }
                     Toggle(
                         "Automatic cleanup (7 days)",
                         isOn: Binding(
@@ -441,6 +457,24 @@ private struct SettingsMenu: View {
             if !isScanning, controller.unlinkedCodexThreadCount == nil {
                 awaitingCleanupScan = false
             }
+        }
+        .onAppear {
+            launchAtLogin.refresh()
+        }
+        .alert(
+            "Couldn’t Change Launch at Login",
+            isPresented: Binding(
+                get: { launchAtLogin.errorMessage != nil },
+                set: { isPresented in
+                    if !isPresented { launchAtLogin.dismissError() }
+                }
+            )
+        ) {
+            Button("OK") {
+                launchAtLogin.dismissError()
+            }
+        } message: {
+            Text(launchAtLogin.errorMessage ?? "Unknown error")
         }
         .alert("Clean up past Codex threads?", isPresented: $showingCleanupConfirmation) {
             Button("Delete", role: .destructive) {
