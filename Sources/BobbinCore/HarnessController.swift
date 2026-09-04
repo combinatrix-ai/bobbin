@@ -110,6 +110,10 @@ public final class HarnessController: ObservableObject {
     private var deletionRetryTasks: [UUID: Task<Void, Never>] = [:]
     private var startingThreadIDs: Set<UUID> = []
     private var scannedUnlinkedCodexThreadIDs: Set<String> = []
+    /// The conversation currently visible in the open popover, if any. This
+    /// is UI display state rather than persisted selection: a selected thread
+    /// can remain selected while the popover is closed or on the list.
+    private var displayedConversationID: UUID? = nil
 
     public init(paths: HarnessPaths? = nil, keyProvider: APIKeyProvider = APIKeyProvider()) throws {
         let paths = try paths ?? HarnessPaths()
@@ -174,12 +178,37 @@ public final class HarnessController: ObservableObject {
     public var selectedThread: HarnessThread? { store.selectedThread }
     public var activeThreads: [HarnessThread] { store.activeThreads }
     public var savedThreads: [HarnessThread] { store.savedThreads }
+    public var isAnyThreadRunning: Bool { store.hasRunningThread }
+    public var runningThreadCount: Int { store.runningThreadCount }
+    public var hasUnseenResults: Bool { store.hasUnseenResults }
+    public var unseenResultThreadCount: Int { store.unseenResultThreadCount }
     public var automaticCleanupEnabled: Bool { store.automaticCleanupEnabled }
     public var expiredCandidateCount: Int { store.expiredCandidateCount() }
     public var pendingDeletionCount: Int { store.deletionTombstones.count }
     /// The list composer is ready for typing in production, but stays
     /// unfocused in demo mode so captures do not include a text caret.
     public var shouldAutofocusNewThread: Bool { !isDemoMode }
+
+    /// VoiceOver value for the status item. The value is derived from
+    /// lifecycle state and therefore stays stable while the icon's working
+    /// animation advances through its frames.
+    public var statusItemAccessibilityValue: String {
+        var parts: [String] = []
+        if runningThreadCount > 0 {
+            parts.append(
+                String(runningThreadCount) + " thread"
+                    + (runningThreadCount == 1 ? "" : "s")
+                    + " working"
+            )
+        }
+        if unseenResultThreadCount > 0 {
+            parts.append(
+                String(unseenResultThreadCount) + " new repl"
+                    + (unseenResultThreadCount == 1 ? "y" : "ies")
+            )
+        }
+        return parts.isEmpty ? "Idle" : parts.joined(separator: ", ")
+    }
 
     /// The directory shown in the new-thread composer. Production keeps the
     /// user's home as the default, while a demo session borrows a directory
@@ -308,6 +337,31 @@ public final class HarnessController: ObservableObject {
         }
     }
 
+    /// Called by the popover only when the conversation surface is actually
+    /// shown. Opening this specific conversation clears its own unseen flag;
+    /// merely opening Bobbin or visiting the list does not.
+    public func conversationDidAppear(_ id: UUID) {
+        displayedConversationID = id
+        do {
+            try store.clearUnseenResult(id)
+            objectWillChange.send()
+        } catch {
+            report(error)
+        }
+    }
+
+    /// Called when the conversation leaves the visible popover. A later
+    /// completion must then become unseen, even if the selected thread remains
+    /// unchanged in the store.
+    public func conversationDidDisappear(_ id: UUID? = nil) {
+        guard id == nil || id == displayedConversationID else { return }
+        displayedConversationID = nil
+    }
+
+    public var isConversationDisplayed: Bool {
+        displayedConversationID != nil
+    }
+
     public func updateWorkingDirectory(_ path: String, for id: UUID) {
         do {
             try store.update(id) { $0.workingDirectory = path }
@@ -391,6 +445,9 @@ public final class HarnessController: ObservableObject {
 
     public func deleteThread(_ id: UUID) {
         guard let thread = store.state.threads.first(where: { $0.id == id }) else { return }
+        if displayedConversationID == id {
+            displayedConversationID = nil
+        }
         let interruptTask = thread.status == .running ? makeInterruptTask(thread) : nil
         do {
             let tombstone = try store.removeThreadAndRecordDeletion(
@@ -469,7 +526,9 @@ public final class HarnessController: ObservableObject {
         // synchronous transition, a second send or rewrite can slip in while
         // `thread/start` / `thread/resume` is still awaiting its response.
         do {
-            try store.update(localThreadID) { $0.status = .running }
+            // Sending a new message means the user has returned to this
+            // conversation, so its prior unseen marker is consumed now.
+            try store.updateStatus(localThreadID, .running)
             objectWillChange.send()
         } catch {
             report(error)
@@ -1292,10 +1351,19 @@ public final class HarnessController: ObservableObject {
     }
 
     private func failTurn(_ error: Error, localThreadID: UUID) {
-        try? store.update(localThreadID) { thread in
-            thread.status = .failed
-            thread.activeTurnID = nil
-            thread.messages.append(ChatMessage(role: .system, text: error.localizedDescription))
+        do {
+            try store.updateStatus(
+                localThreadID,
+                .failed,
+                conversationIsDisplayed: displayedConversationID == localThreadID
+            ) { thread in
+                thread.activeTurnID = nil
+                thread.messages.append(ChatMessage(role: .system, text: error.localizedDescription))
+            }
+        } catch {
+            // Preserve the transport failure as the user-facing error below;
+            // this matches the previous best-effort persistence behavior and
+            // avoids replacing it with a secondary disk-write failure.
         }
         objectWillChange.send()
         report(error)
@@ -1925,14 +1993,19 @@ public final class HarnessController: ObservableObject {
 
         let status = turn["status"] as? String ?? "failed"
         do {
-            try store.update(localThread.id) { thread in
+            let nextStatus: HarnessThreadStatus
+            switch status {
+            case "completed": nextStatus = .done
+            case "interrupted": nextStatus = .stopped
+            default: nextStatus = .failed
+            }
+            try store.updateStatus(
+                localThread.id,
+                nextStatus,
+                conversationIsDisplayed: displayedConversationID == localThread.id
+            ) { thread in
                 thread.activeTurnID = nil
                 thread.lastConversationAt = Date()
-                switch status {
-                case "completed": thread.status = .done
-                case "interrupted": thread.status = .stopped
-                default: thread.status = .failed
-                }
             }
             objectWillChange.send()
         } catch {

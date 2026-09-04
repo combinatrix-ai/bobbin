@@ -148,6 +148,66 @@ final class ThreadStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testUnseenResultDefaultsForExistingStateAndPersistsWhenSet() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(
+                with: Data(contentsOf: fixture.paths.stateFile)
+            ) as? [String: Any]
+        )
+        var threads = try XCTUnwrap(object["threads"] as? [[String: Any]])
+        threads[0].removeValue(forKey: "hasUnseenResult")
+        object["threads"] = threads
+        try JSONSerialization.data(withJSONObject: object)
+            .write(to: fixture.paths.stateFile, options: .atomic)
+
+        let reloaded = try ThreadStore(paths: fixture.paths)
+        XCTAssertFalse(reloaded.state.threads.first?.hasUnseenResult ?? true)
+
+        try reloaded.update(thread.id) { $0.hasUnseenResult = true }
+        let persisted = try ThreadStore(paths: fixture.paths)
+        XCTAssertTrue(persisted.state.threads.first?.hasUnseenResult ?? false)
+    }
+
+    @MainActor
+    func testUnseenResultOnlyComesFromRunningCompletionAndCanBeClearedPerThread() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let hiddenDone = try fixture.store.createThread(workingDirectory: "/tmp/hidden-done")
+        let visibleDone = try fixture.store.createThread(workingDirectory: "/tmp/visible-done")
+        let stopped = try fixture.store.createThread(workingDirectory: "/tmp/stopped")
+
+        try fixture.store.update(hiddenDone.id) { $0.hasUnseenResult = true }
+        try fixture.store.updateStatus(hiddenDone.id, .running)
+        XCTAssertFalse(
+            fixture.store.state.threads.first { $0.id == hiddenDone.id }?.hasUnseenResult ?? true,
+            "starting a new turn consumes that thread's prior unseen result"
+        )
+        try fixture.store.updateStatus(hiddenDone.id, .done)
+        try fixture.store.updateStatus(visibleDone.id, .running)
+        try fixture.store.updateStatus(
+            visibleDone.id,
+            .done,
+            conversationIsDisplayed: true
+        )
+        try fixture.store.updateStatus(stopped.id, .running)
+        try fixture.store.updateStatus(stopped.id, .stopped)
+
+        XCTAssertTrue(fixture.store.state.threads.first { $0.id == hiddenDone.id }?.hasUnseenResult ?? false)
+        XCTAssertFalse(fixture.store.state.threads.first { $0.id == visibleDone.id }?.hasUnseenResult ?? true)
+        XCTAssertFalse(fixture.store.state.threads.first { $0.id == stopped.id }?.hasUnseenResult ?? true)
+        XCTAssertEqual(fixture.store.unseenResultThreadCount, 1)
+
+        try fixture.store.clearUnseenResult(hiddenDone.id)
+        XCTAssertFalse(fixture.store.hasUnseenResults)
+        XCTAssertFalse(try ThreadStore(paths: fixture.paths).hasUnseenResults)
+    }
+
+    @MainActor
     func testThreadModelDefaultsAndSelectionPersist() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

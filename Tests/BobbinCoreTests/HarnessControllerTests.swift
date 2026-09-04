@@ -130,6 +130,154 @@ final class HarnessControllerTests: XCTestCase {
         XCTAssertTrue(client.requests.isEmpty)
     }
 
+    func testHiddenCompletionMarksUnseenAndOpeningConversationClearsIt() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let controller = try HarnessController(
+            testPaths: fixture.paths,
+            appServerClient: RecordingAppServerClient()
+        )
+        let threadID = try XCTUnwrap(controller.store.state.selectedThreadID)
+        try controller.store.update(threadID) { thread in
+            thread.codexThreadID = "hidden-thread"
+            thread.status = .running
+        }
+
+        controller.handleNotification([
+            "method": "turn/completed",
+            "params": [
+                "threadId": "hidden-thread",
+                "turn": ["status": "completed"]
+            ]
+        ])
+
+        XCTAssertTrue(controller.store.state.threads.first?.hasUnseenResult ?? false)
+        XCTAssertEqual(controller.statusItemAccessibilityValue, "1 new reply")
+
+        controller.conversationDidAppear(threadID)
+        XCTAssertFalse(controller.store.state.threads.first?.hasUnseenResult ?? true)
+        XCTAssertEqual(controller.statusItemAccessibilityValue, "Idle")
+    }
+
+    func testDisplayedCompletionAndStoppedCompletionDoNotMarkUnseen() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let controller = try HarnessController(
+            testPaths: fixture.paths,
+            appServerClient: RecordingAppServerClient()
+        )
+        let displayedID = try XCTUnwrap(controller.store.state.selectedThreadID)
+        let stopped = try controller.store.createThread(workingDirectory: "/tmp/stopped")
+        try controller.store.update(displayedID) { thread in
+            thread.codexThreadID = "displayed-thread"
+            thread.status = .running
+        }
+        try controller.store.update(stopped.id) { thread in
+            thread.codexThreadID = "stopped-thread"
+            thread.status = .running
+        }
+        controller.conversationDidAppear(displayedID)
+
+        controller.handleNotification([
+            "method": "turn/completed",
+            "params": [
+                "threadId": "displayed-thread",
+                "turn": ["status": "completed"]
+            ]
+        ])
+        controller.conversationDidDisappear()
+        controller.handleNotification([
+            "method": "turn/completed",
+            "params": [
+                "threadId": "stopped-thread",
+                "turn": ["status": "interrupted"]
+            ]
+        ])
+
+        XCTAssertEqual(controller.store.unseenResultThreadCount, 0)
+        XCTAssertEqual(controller.statusItemAccessibilityValue, "Idle")
+    }
+
+    func testFailedCompletionMarksUnseenWhenConversationIsHidden() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let controller = try HarnessController(
+            testPaths: fixture.paths,
+            appServerClient: RecordingAppServerClient()
+        )
+        let threadID = try XCTUnwrap(controller.store.state.selectedThreadID)
+        try controller.store.update(threadID) { thread in
+            thread.codexThreadID = "failed-thread"
+            thread.status = .running
+        }
+
+        controller.handleNotification([
+            "method": "turn/completed",
+            "params": [
+                "threadId": "failed-thread",
+                "turn": ["status": "failed"]
+            ]
+        ])
+
+        let thread = try XCTUnwrap(
+            controller.store.state.threads.first(where: { $0.id == threadID })
+        )
+        XCTAssertEqual(thread.status, .failed)
+        XCTAssertTrue(thread.hasUnseenResult)
+        XCTAssertEqual(controller.statusItemAccessibilityValue, "1 new reply")
+    }
+
+    func testSendingAThreadClearsItsUnseenResultBeforeTheTurnStarts() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let client = RecordingAppServerClient()
+        let controller = try HarnessController(
+            testPaths: fixture.paths,
+            appServerClient: client
+        )
+        let threadID = try XCTUnwrap(controller.store.state.selectedThreadID)
+        try controller.store.update(threadID) { thread in
+            thread.codexThreadID = "existing-thread"
+            thread.status = .done
+            thread.hasUnseenResult = true
+        }
+
+        controller.send("follow up", in: threadID)
+        XCTAssertFalse(controller.store.state.threads.first?.hasUnseenResult ?? true)
+        await waitUntil("follow-up turn starts") {
+            client.requests.contains(where: { $0.method == "turn/start" })
+        }
+    }
+
+    func testStatusItemAccessibilityValueIncludesWorkingAndUnseenCounts() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+
+        let controller = try HarnessController(
+            testPaths: fixture.paths,
+            appServerClient: RecordingAppServerClient()
+        )
+        let firstID = try XCTUnwrap(controller.store.state.selectedThreadID)
+        let second = try controller.store.createThread(workingDirectory: "/tmp/second")
+        try controller.store.update(firstID) { thread in
+            thread.status = .running
+            thread.hasUnseenResult = true
+        }
+        try controller.store.update(second.id) { thread in
+            thread.status = .running
+            thread.hasUnseenResult = true
+        }
+
+        XCTAssertEqual(
+            controller.statusItemAccessibilityValue,
+            "2 threads working, 2 new replies"
+        )
+    }
+
     func testDeleteThreadRemovesIdleStopsRunningAndClearsSelection() async throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

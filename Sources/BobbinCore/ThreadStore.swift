@@ -40,6 +40,24 @@ public final class ThreadStore: ObservableObject {
             .sorted { $0.lastConversationAt > $1.lastConversationAt }
     }
 
+    /// Whether at least one local turn is still in flight. Saved threads can
+    /// be running too, so this intentionally considers every thread.
+    public var hasRunningThread: Bool {
+        state.threads.contains { $0.status == .running }
+    }
+
+    public var runningThreadCount: Int {
+        state.threads.count(where: { $0.status == .running })
+    }
+
+    public var unseenResultThreadCount: Int {
+        state.threads.count(where: { $0.hasUnseenResult })
+    }
+
+    public var hasUnseenResults: Bool {
+        unseenResultThreadCount > 0
+    }
+
     public var savedThreads: [HarnessThread] {
         state.threads
             .filter(\.isSaved)
@@ -95,6 +113,40 @@ public final class ThreadStore: ObservableObject {
             throw HarnessError.threadNotFound
         }
         state.selectedThreadID = id
+        try persist()
+    }
+
+    /// Applies a lifecycle status transition and records unseen output only
+    /// for a real running -> done/failed transition. Stopped is intentionally
+    /// not treated as new output because the user explicitly interrupted it.
+    public func updateStatus(
+        _ id: UUID,
+        _ status: HarnessThreadStatus,
+        conversationIsDisplayed: Bool = false,
+        mutate: (inout HarnessThread) -> Void = { _ in }
+    ) throws {
+        guard let index = state.threads.firstIndex(where: { $0.id == id }) else {
+            throw HarnessError.threadNotFound
+        }
+        let wasRunning = state.threads[index].status == .running
+        state.threads[index].status = status
+        if status == .running {
+            state.threads[index].hasUnseenResult = false
+        } else if wasRunning && (status == .done || status == .failed) {
+            state.threads[index].hasUnseenResult = !conversationIsDisplayed
+        }
+        mutate(&state.threads[index])
+        try persist()
+    }
+
+    /// Clears only the supplied conversation's notification. Opening the
+    /// thread list must not call this method.
+    public func clearUnseenResult(_ id: UUID) throws {
+        guard let index = state.threads.firstIndex(where: { $0.id == id }) else {
+            throw HarnessError.threadNotFound
+        }
+        guard state.threads[index].hasUnseenResult else { return }
+        state.threads[index].hasUnseenResult = false
         try persist()
     }
 

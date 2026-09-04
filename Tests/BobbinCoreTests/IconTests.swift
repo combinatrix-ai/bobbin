@@ -72,6 +72,39 @@ final class IconTests: XCTestCase {
 
     // MARK: - Rendering
 
+    func testMenuBarBreathingAndSettleTimingMatchesTheApprovedCue() {
+        XCTAssertEqual(
+            IconRenderer.MenuBarAnimation.breathingOpacity(elapsed: 0),
+            1,
+            accuracy: 1e-12
+        )
+        XCTAssertEqual(
+            IconRenderer.MenuBarAnimation.breathingOpacity(elapsed: 1.5),
+            0.3,
+            accuracy: 1e-12
+        )
+        XCTAssertEqual(
+            IconRenderer.MenuBarAnimation.breathingOpacity(elapsed: 3),
+            1,
+            accuracy: 1e-12
+        )
+        XCTAssertEqual(
+            IconRenderer.MenuBarAnimation.settlingOpacity(from: 0.3, elapsed: 0),
+            0.3,
+            accuracy: 1e-12
+        )
+        XCTAssertEqual(
+            IconRenderer.MenuBarAnimation.settlingOpacity(from: 0.3, elapsed: 0.4),
+            1,
+            accuracy: 1e-12
+        )
+        XCTAssertEqual(
+            IconRenderer.MenuBarAnimation.settlingOpacity(from: 0.3, elapsed: 2),
+            1,
+            accuracy: 1e-12
+        )
+    }
+
     func testMenuBarSilhouetteIsATrueMonochromeTemplate() throws {
         let data = try IconRenderer.templatePNG(pixels: 32)
         let pixels = try readPixels(data, size: 32)
@@ -94,6 +127,78 @@ final class IconTests: XCTestCase {
         XCTAssertTrue(image.isTemplate)
         XCTAssertEqual(image.size.width, 18)
         XCTAssertEqual(image.size.height, 18)
+    }
+
+    func testMenuBarWorkingCoreUsesOnlyAlpha() throws {
+        let full = try readPixels(
+            try IconRenderer.menuBarPNG(
+                pixels: 180,
+                state: IconRenderer.MenuBarIconState(
+                    isWorking: true,
+                    coreOpacity: 1
+                )
+            ),
+            size: 180
+        )
+        let dim = try readPixels(
+            try IconRenderer.menuBarPNG(
+                pixels: 180,
+                state: IconRenderer.MenuBarIconState(
+                    isWorking: true,
+                    coreOpacity: 0.3
+                )
+            ),
+            size: 180
+        )
+
+        let center = 90 * 180 + 90
+        XCTAssertGreaterThan(full[center].alpha, dim[center].alpha)
+        XCTAssertEqual(full[center].red, 0)
+        XCTAssertEqual(full[center].green, 0)
+        XCTAssertEqual(full[center].blue, 0)
+        XCTAssertEqual(dim[center].red, 0)
+        XCTAssertEqual(dim[center].green, 0)
+        XCTAssertEqual(dim[center].blue, 0)
+    }
+
+    func testMenuBarUnseenBadgeAddsOneDotWithTransparentKnockout() throws {
+        let quiet = try readPixels(
+            try IconRenderer.menuBarPNG(pixels: 180),
+            size: 180
+        )
+        let unseen = try readPixels(
+            try IconRenderer.menuBarPNG(
+                pixels: 180,
+                state: IconRenderer.MenuBarIconState(hasUnseenResult: true)
+            ),
+            size: 180
+        )
+
+        let dotCenter = 145 * 180 + 145
+        XCTAssertEqual(quiet[dotCenter].alpha, 0, "the quiet glyph has no badge")
+        XCTAssertGreaterThan(unseen[dotCenter].alpha, 200, "badge center is solid")
+
+        // At 10x, a point 3 pt from (14.5, 14.5) is inside the 7 pt
+        // knockout but outside the 5 pt dot.
+        let knockoutSample = 145 * 180 + 115
+        XCTAssertEqual(unseen[knockoutSample].alpha, 0)
+
+        let quietCoverage = quiet.filter { $0.alpha > 0 }.count
+        let unseenCoverage = unseen.filter { $0.alpha > 0 }.count
+        XCTAssertGreaterThan(unseenCoverage, quietCoverage)
+    }
+
+    func testMenuBarBadgeRemainsAChromelessTemplate() throws {
+        let data = try IconRenderer.menuBarPNG(
+            pixels: 32,
+            state: IconRenderer.MenuBarIconState(hasUnseenResult: true)
+        )
+        let pixels = try readPixels(data, size: 32)
+        for pixel in pixels where pixel.alpha > 0 {
+            XCTAssertEqual(pixel.red, 0)
+            XCTAssertEqual(pixel.green, 0)
+            XCTAssertEqual(pixel.blue, 0)
+        }
     }
 
     func testAppIconRendersPlateAndCoreColours() throws {

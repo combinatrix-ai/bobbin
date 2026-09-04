@@ -235,6 +235,11 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
     public var lastConversationAt: Date
     public var savedAt: Date?
     public var status: HarnessThreadStatus
+    /// True when a done or failed result arrived while this conversation was
+    /// not displayed in the open popover. This is deliberately per-thread so
+    /// the list can identify which conversation needs attention while the
+    /// menu-bar glyph only needs the aggregate.
+    public var hasUnseenResult: Bool
     public var messages: [ChatMessage]
     public var toolCalls: [ToolCall]
 
@@ -252,6 +257,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         lastConversationAt: Date = Date(),
         savedAt: Date? = nil,
         status: HarnessThreadStatus = .idle,
+        hasUnseenResult: Bool = false,
         messages: [ChatMessage] = [],
         toolCalls: [ToolCall] = []
     ) {
@@ -272,6 +278,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         self.lastConversationAt = lastConversationAt
         self.savedAt = savedAt
         self.status = status
+        self.hasUnseenResult = hasUnseenResult
         self.messages = messages
         self.toolCalls = toolCalls
     }
@@ -314,6 +321,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         case lastConversationAt
         case savedAt
         case status
+        case hasUnseenResult
         case messages
         case toolCalls
     }
@@ -343,6 +351,9 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         lastConversationAt = try container.decode(Date.self, forKey: .lastConversationAt)
         savedAt = try container.decodeIfPresent(Date.self, forKey: .savedAt)
         status = try container.decode(HarnessThreadStatus.self, forKey: .status)
+        // This key was added after the original state format. A missing key
+        // means the existing conversation has no unseen result.
+        hasUnseenResult = try container.decodeIfPresent(Bool.self, forKey: .hasUnseenResult) ?? false
         messages = try container.decode([ChatMessage].self, forKey: .messages)
         toolCalls = try container.decodeIfPresent([ToolCall].self, forKey: .toolCalls) ?? []
     }
@@ -362,6 +373,7 @@ public struct HarnessThread: Codable, Identifiable, Equatable, Sendable {
         try container.encode(lastConversationAt, forKey: .lastConversationAt)
         try container.encodeIfPresent(savedAt, forKey: .savedAt)
         try container.encode(status, forKey: .status)
+        try container.encode(hasUnseenResult, forKey: .hasUnseenResult)
         try container.encode(messages, forKey: .messages)
         try container.encode(toolCalls, forKey: .toolCalls)
     }

@@ -48,6 +48,12 @@ struct RootView: View {
                 controller.boot()
             }
         }
+        .onDisappear {
+            // The menu-bar popover can close while its navigation destination
+            // remains a conversation. Clear display ownership at the scene
+            // boundary so a later completion is correctly marked unseen.
+            controller.conversationDidDisappear()
+        }
     }
 
     @ViewBuilder

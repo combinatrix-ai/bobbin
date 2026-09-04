@@ -71,6 +71,24 @@ struct HarnessView: View {
             }
         }
         .background(.regularMaterial)
+        .onAppear(perform: syncDisplayedConversation)
+        .onChange(of: session.destination) { _, _ in
+            syncDisplayedConversation()
+        }
+        .onDisappear {
+            // MenuBarExtra may hide the popover without changing the
+            // destination. A hidden conversation must not suppress the next
+            // unseen-result marker.
+            controller.conversationDidDisappear()
+        }
+    }
+
+    private func syncDisplayedConversation() {
+        if case .conversation(let id) = session.destination {
+            controller.conversationDidAppear(id)
+        } else {
+            controller.conversationDidDisappear()
+        }
     }
 
     private func openSystemPrompt() {
@@ -82,12 +100,14 @@ struct HarnessView: View {
 
     private func openConversation(_ id: UUID) {
         controller.selectThread(id)
+        controller.conversationDidAppear(id)
         withAnimation(.easeOut(duration: 0.16)) {
             session.destination = .conversation(id)
         }
     }
 
     private func closeConversation() {
+        controller.conversationDidDisappear()
         withAnimation(.easeOut(duration: 0.16)) {
             session.destination = .threadList
         }
@@ -754,10 +774,20 @@ private struct ThreadRow: View {
                             .fill(Color.harnessAccent)
                             .frame(width: 6, height: 6)
                             .accessibilityLabel("Running")
+                    } else if thread.hasUnseenResult {
+                        Circle()
+                            .fill(Color.primary)
+                            .frame(width: 6, height: 6)
+                            .accessibilityLabel("New reply")
                     }
 
                     Text(thread.title)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(
+                            .system(
+                                size: 12,
+                                weight: thread.hasUnseenResult ? .semibold : .medium
+                            )
+                        )
                         .lineLimit(1)
 
                     Spacer(minLength: 3)
@@ -808,17 +838,27 @@ private struct ThreadRow: View {
     }
 
     private var accessibilityLabel: String {
-        if thread.isSaved { return "\(thread.title), saved, \(metadata)" }
-        return "\(thread.title), \(metadata)"
+        let newReply = thread.hasUnseenResult ? ", new reply" : ""
+        if thread.isSaved { return "\(thread.title), saved\(newReply), \(metadata)" }
+        return "\(thread.title)\(newReply), \(metadata)"
     }
 
     private var metadata: String {
         if thread.status == .running { return "Running" }
         let age = max(0, Date().timeIntervalSince(thread.lastConversationAt))
+        let ageText: String
         if automaticCleanupEnabled && !thread.isSaved {
             let remaining = Int(ceil((7 * 24 * 60 * 60 - age) / (24 * 60 * 60)))
-            if remaining <= 2 { return "\(max(0, remaining))d left" }
+            if remaining <= 2 { ageText = "\(max(0, remaining))d left" }
+            else { ageText = relativeAge(age) }
+        } else {
+            ageText = relativeAge(age)
         }
+        if thread.status == .failed { return "Failed · \(ageText)" }
+        return ageText
+    }
+
+    private func relativeAge(_ age: TimeInterval) -> String {
         if age < 60 { return "Just now" }
         if age < 3_600 { return "\(Int(age / 60))m ago" }
         if age < 86_400 { return "\(Int(age / 3_600))h ago" }

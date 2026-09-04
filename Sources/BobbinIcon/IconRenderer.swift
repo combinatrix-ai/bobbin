@@ -203,6 +203,102 @@ public enum IconRenderer {
 }
 
 extension IconRenderer {
+    /// Pure timing functions for the menu-bar working cue. Keeping the
+    /// easing here makes the visual contract independently testable without
+    /// constructing SwiftUI views or running a display timer.
+    public enum MenuBarAnimation {
+        public static let breathDuration: TimeInterval = 3
+        public static let settleDuration: TimeInterval = 0.4
+
+        public static func breathingOpacity(elapsed: TimeInterval) -> Double {
+            let phase = max(0, elapsed)
+                .truncatingRemainder(dividingBy: breathDuration)
+                / breathDuration
+            let eased = 0.5 - 0.5 * cos(phase * 2 * .pi)
+            return 1 - 0.7 * eased
+        }
+
+        public static func settlingOpacity(
+            from initialOpacity: Double,
+            elapsed: TimeInterval
+        ) -> Double {
+            let initial = min(1, max(0, initialOpacity))
+            let progress = min(1, max(0, elapsed / settleDuration))
+            return initial + (1 - initial) * progress
+        }
+    }
+
+    /// The non-animated state inputs for a menu-bar glyph. The animation is
+    /// intentionally represented as a core alpha so the loop and badge can
+    /// remain pixel-identical across frames.
+    public struct MenuBarIconState: Equatable, Sendable {
+        public var isWorking: Bool
+        public var hasUnseenResult: Bool
+        public var coreOpacity: Double
+
+        public init(
+            isWorking: Bool = false,
+            hasUnseenResult: Bool = false,
+            coreOpacity: Double = 1
+        ) {
+            self.isWorking = isWorking
+            self.hasUnseenResult = hasUnseenResult
+            self.coreOpacity = min(1, max(0, coreOpacity))
+        }
+
+        public static let quiet = Self()
+    }
+
+    private static func drawMenuBarGlyph(
+        in context: CGContext,
+        pointSize: CGFloat,
+        markSize: CGFloat,
+        spec: MarkSpec,
+        coreOpacity: Double,
+        hasUnseenResult: Bool
+    ) {
+        let inset = (pointSize - markSize) / 2
+        drawMark(
+            in: context,
+            fitting: CGRect(x: inset, y: inset, width: markSize, height: markSize),
+            spec: spec,
+            loopColor: .black,
+            coreColor: IconColor(hex: 0x000000, alpha: min(1, max(0, coreOpacity)))
+        )
+
+        guard hasUnseenResult else { return }
+
+        // The badge is placed in the 18 pt image's coordinate system, not in
+        // the mark's fitted box. Knock out seven points first so the solid
+        // five-point dot remains legible over the lower-right loop.
+        let scale = pointSize / 18
+        let center = CGPoint(x: 14.5 * scale, y: 14.5 * scale)
+        let knockoutRadius = 3.5 * scale
+        let dotRadius = 2.5 * scale
+
+        context.saveGState()
+        context.setBlendMode(.clear)
+        context.fillEllipse(
+            in: CGRect(
+                x: center.x - knockoutRadius,
+                y: center.y - knockoutRadius,
+                width: knockoutRadius * 2,
+                height: knockoutRadius * 2
+            )
+        )
+        context.setBlendMode(.normal)
+        setFill(context, .black)
+        context.fillEllipse(
+            in: CGRect(
+                x: center.x - dotRadius,
+                y: center.y - dotRadius,
+                width: dotRadius * 2,
+                height: dotRadius * 2
+            )
+        )
+        context.restoreGState()
+    }
+
     /// The status-item glyph.
     ///
     /// Built in code from the same `MarkSpec` as the app icon and flagged as a
@@ -211,7 +307,9 @@ extension IconRenderer {
     public static func menuBarImage(
         pointSize: CGFloat = 18,
         markSize: CGFloat = 15,
-        spec: MarkSpec = .standard
+        spec: MarkSpec = .standard,
+        coreOpacity: Double = 1,
+        hasUnseenResult: Bool = false
     ) -> NSImage {
         let image = NSImage(
             size: NSSize(width: pointSize, height: pointSize),
@@ -220,18 +318,54 @@ extension IconRenderer {
             guard let context = NSGraphicsContext.current?.cgContext else { return false }
             context.translateBy(x: 0, y: rect.height)
             context.scaleBy(x: 1, y: -1)
-            let inset = (rect.width - markSize) / 2
-            drawMark(
+            drawMenuBarGlyph(
                 in: context,
-                fitting: CGRect(x: inset, y: inset, width: markSize, height: markSize),
+                pointSize: rect.width,
+                markSize: markSize,
                 spec: spec,
-                loopColor: .black,
-                coreColor: .black
+                coreOpacity: coreOpacity,
+                hasUnseenResult: hasUnseenResult
             )
             return true
         }
         image.isTemplate = true
         return image
+    }
+
+    public static func menuBarImage(
+        pointSize: CGFloat = 18,
+        markSize: CGFloat = 15,
+        spec: MarkSpec = .standard,
+        state: MenuBarIconState
+    ) -> NSImage {
+        menuBarImage(
+            pointSize: pointSize,
+            markSize: markSize,
+            spec: spec,
+            coreOpacity: state.coreOpacity,
+            hasUnseenResult: state.hasUnseenResult
+        )
+    }
+
+    /// Pixel rendering counterpart used by icon regression tests and tools.
+    /// Keeping it beside `menuBarImage` makes the badge geometry testable
+    /// without depending on AppKit's lazy NSImage drawing lifecycle.
+    public static func menuBarPNG(
+        pixels: Int,
+        spec: MarkSpec = .standard,
+        state: MenuBarIconState = .quiet
+    ) throws -> Data {
+        let context = try makeContext(pixelWidth: pixels, pixelHeight: pixels)
+        let pointSize = CGFloat(pixels)
+        drawMenuBarGlyph(
+            in: context,
+            pointSize: pointSize,
+            markSize: pointSize * (15.0 / 18.0),
+            spec: spec,
+            coreOpacity: state.coreOpacity,
+            hasUnseenResult: state.hasUnseenResult
+        )
+        return try pngData(from: context)
     }
 
     /// The full-colour mark, for the one in-app surface that earns it: the
