@@ -920,17 +920,22 @@ private struct ConversationView: View {
                     .lineLimit(1...maxComposerLines)
                     .frame(minHeight: 32, alignment: .center)
                     .disabled(editingMessageID != nil || controller.isRewriting(thread.id))
+                    .onKeyPress(.return, phases: .down) { keyPress in
+                        guard !keyPress.modifiers.contains(.shift) else {
+                            return .ignored
+                        }
+                        guard thread.status != .running else {
+                            return .handled
+                        }
+                        sendOrStop()
+                        return .handled
+                    }
 
                 ComposerActionButton(
                     isRunning: thread.status == .running,
                     isDisabled: isSendDisabled(thread),
                     helpText: sendHelp(thread),
                     action: sendOrStop
-                )
-                .keyboardShortcut(
-                    editingMessageID == nil
-                        ? KeyboardShortcut(.return, modifiers: .command)
-                        : nil
                 )
             }
         }
@@ -977,7 +982,7 @@ private struct ConversationView: View {
         if thread.status == .running {
             controller.stopThread(thread.id)
         } else {
-            guard editingMessageID == nil else { return }
+            guard !isSendDisabled(thread) else { return }
             let outgoing = prompt
             prompt = ""
             controller.send(outgoing, in: thread.id)
