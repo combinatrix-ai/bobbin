@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="${0:A:h}"
 PROJECT_DIR="${SCRIPT_DIR:h}"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PROJECT_DIR/Resources/Info.plist")"
-BUILD_NUMBER="${BUILD_NUMBER:-1}"
+BUILD_NUMBER="${BUILD_NUMBER:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PROJECT_DIR/Resources/Info.plist")}"
 TAG="${TAG:-v$APP_VERSION}"
 NOTARY_PROFILE="${NOTARY_PROFILE:-until-notary}"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:-Developer ID Application: COMBINATRIX K.K. (3Y275A5TZ8)}"

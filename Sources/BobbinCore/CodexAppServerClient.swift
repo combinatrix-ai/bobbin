@@ -93,7 +93,7 @@ public final class CodexAppServerClient: @unchecked Sendable {
                 "clientInfo": [
                     "name": "bobbin",
                     "title": "Bobbin",
-                    "version": "0.1.0"
+                    "version": "0.1.1"
                 ]
             ]
         )

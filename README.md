@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://bobbin.combinatrix.ai/">Website</a> ·
-  <a href="https://github.com/combinatrix-ai/bobbin/releases/latest/download/Bobbin-v0.1.0.dmg">Download for macOS</a>
+  <a href="https://github.com/combinatrix-ai/bobbin/releases/latest/download/Bobbin-v0.1.1.dmg">Download for macOS</a>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@ Bobbin is a small macOS menu bar client for the useful tasks that do not need to
 
 ## Install
 
-Download the notarized [Bobbin DMG](https://github.com/combinatrix-ai/bobbin/releases/latest/download/Bobbin-v0.1.0.dmg), open it, and drag Bobbin to Applications. Bobbin requires macOS 14 or later and a locally installed Codex CLI.
+Download the notarized [Bobbin DMG](https://github.com/combinatrix-ai/bobbin/releases/latest/download/Bobbin-v0.1.1.dmg), open it, and drag Bobbin to Applications. Bobbin requires macOS 14 or later and a locally installed Codex CLI.
 
 ## Thread lightly
 
