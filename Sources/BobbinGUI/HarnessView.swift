@@ -914,7 +914,9 @@ private struct ConversationView: View {
     }
 
     private func messageList(_ thread: HarnessThread) -> some View {
-        ScrollViewReader { proxy in
+        let bottomID = "transcript-bottom:\(thread.id.uuidString)"
+
+        return ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(transcriptBlocks(for: thread)) { block in
@@ -949,15 +951,25 @@ private struct ConversationView: View {
                     if isAwaitingAssistant(thread) {
                         PendingReplyIndicator()
                     }
+
+                    Color.clear
+                        .frame(height: 0)
+                        .id(bottomID)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
             }
             .scrollIndicators(.automatic)
-            .onChange(of: thread.transcriptEntries) { _, entries in
-                guard let last = entries.last else { return }
+            .onAppear {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    proxy.scrollTo(bottomID, anchor: .bottom)
+                }
+            }
+            .onChange(of: thread.transcriptEntries) { _, _ in
                 withAnimation(.easeOut(duration: 0.16)) {
-                    proxy.scrollTo(last.id, anchor: .bottom)
+                    proxy.scrollTo(bottomID, anchor: .bottom)
                 }
             }
         }
