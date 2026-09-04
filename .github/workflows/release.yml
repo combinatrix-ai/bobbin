@@ -25,6 +25,7 @@ jobs:
     timeout-minutes: 45
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      APPLE_TEAM_ID: 3Y275A5TZ8
       CODESIGN_IDENTITY: "Developer ID Application: COMBINATRIX K.K. (3Y275A5TZ8)"
       NOTARY_PROFILE: bobbin-notary
 
@@ -103,7 +104,6 @@ jobs:
       - name: Store Apple notarization credentials
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           NOTARY_PASSWORD: ${{ secrets.NOTARY_PASSWORD }}
         run: |
           set -euo pipefail
