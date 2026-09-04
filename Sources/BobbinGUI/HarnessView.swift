@@ -282,19 +282,19 @@ private struct ThreadListView: View {
     private var newThreadField: some View {
         ComposerSurface {
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("Ask anything…", text: $draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12))
-                    .lineLimit(1...3)
-                    .frame(minHeight: 32, alignment: .center)
-                    .focused($editorFocused)
-                    .onKeyPress(.return, phases: .down) { keyPress in
-                        guard !keyPress.modifiers.contains(.shift) else {
-                            return .ignored
-                        }
-                        submit()
-                        return .handled
-                    }
+                IMEAwareComposer(
+                    text: $draft,
+                    isFocused: Binding(
+                        get: { editorFocused },
+                        set: { editorFocused = $0 }
+                    ),
+                    placeholder: "Ask anything…",
+                    fontSize: 12,
+                    maxLines: 3,
+                    isEnabled: true,
+                    onSubmit: submit
+                )
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .center)
 
                 ComposerActionButton(
                     isRunning: false,
@@ -951,6 +951,7 @@ private struct ConversationView: View {
     let back: () -> Void
 
     @State private var prompt = ""
+    @State private var composerFocused = false
     @State private var showingServerDetail = false
     @State private var editingMessageID: UUID?
     @State private var editDraft = ""
@@ -1072,26 +1073,21 @@ private struct ConversationView: View {
     private func composer(_ thread: HarnessThread) -> some View {
         ComposerSurface {
             HStack(alignment: .bottom, spacing: 8) {
-                // A vertical-axis TextField gives the placeholder for free, so the
-                // prompt and the placeholder share one inset and one baseline. It
-                // starts exactly one line tall and grows to `maxComposerLines`
-                // before it starts scrolling.
-                TextField("Message", text: $prompt, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 12.5))
-                    .lineLimit(1...maxComposerLines)
-                    .frame(minHeight: 32, alignment: .center)
-                    .disabled(editingMessageID != nil || controller.isRewriting(thread.id))
-                    .onKeyPress(.return, phases: .down) { keyPress in
-                        guard !keyPress.modifiers.contains(.shift) else {
-                            return .ignored
-                        }
-                        guard thread.status != .running else {
-                            return .handled
-                        }
+                // The AppKit-backed composer keeps the prompt and placeholder on
+                // one inset and grows to `maxComposerLines` before it scrolls.
+                IMEAwareComposer(
+                    text: $prompt,
+                    isFocused: $composerFocused,
+                    placeholder: "Message",
+                    fontSize: 12.5,
+                    maxLines: maxComposerLines,
+                    isEnabled: editingMessageID == nil && !controller.isRewriting(thread.id),
+                    onSubmit: {
+                        guard thread.status != .running else { return }
                         sendOrStop()
-                        return .handled
                     }
+                )
+                    .frame(maxWidth: .infinity, minHeight: 32, alignment: .center)
 
                 ComposerActionButton(
                     isRunning: thread.status == .running,
