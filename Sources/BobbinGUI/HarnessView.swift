@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import BobbinCore
+import BobbinIcon
 
 private func presentFolderChooser(
     startingAt path: String,
@@ -720,8 +721,12 @@ private struct SavedSection: View {
                 Spacer()
             }
             .padding(.top, 9)
-            .padding(.horizontal, 8)
+            // Match the title column below: the list's 8 pt inset, the row's
+            // 8 pt leading padding, then its 6 pt indicator slot and 7 pt gap.
+            .padding(.leading, 21)
+            .padding(.trailing, 8)
             .padding(.bottom, 4)
+            .accessibilityAddTraits(.isHeader)
 
             ForEach(threads) { thread in
                 ThreadRow(
@@ -763,23 +768,23 @@ private struct ThreadRow: View {
     }
 
     @State private var isHovering = false
+    @State private var runningDotOpacity = 1.0
     @FocusState private var saveFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @EnvironmentObject private var activityClock: MenuBarActivityClock
+
+    private var isRunning: Bool { thread.status == .running }
+
+    private var animationTaskID: String {
+        "\(isRunning ? "running" : "quiet"):\(reduceMotion ? "reduced" : "motion"):"
+            + String(activityClock.phaseStartedAt.timeIntervalSinceReferenceDate)
+    }
 
     var body: some View {
         HStack(spacing: 1) {
             Button(action: select) {
                 HStack(spacing: 7) {
-                    if thread.status == .running {
-                        Circle()
-                            .fill(Color.harnessAccent)
-                            .frame(width: 6, height: 6)
-                            .accessibilityLabel("Running")
-                    } else if thread.hasUnseenResult {
-                        Circle()
-                            .fill(Color.primary)
-                            .frame(width: 6, height: 6)
-                            .accessibilityLabel("New reply")
-                    }
+                    leadingIndicator
 
                     Text(thread.title)
                         .font(
@@ -805,6 +810,7 @@ private struct ThreadRow: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel(accessibilityLabel)
+            .accessibilityValue(accessibilityValue)
 
             Button(action: save) {
                 Image(systemName: thread.isSaved ? "star.fill" : "star")
@@ -828,6 +834,9 @@ private struct ThreadRow: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .opacity(opacity)
         .onHover { isHovering = $0 }
+        .task(id: animationTaskID) {
+            await animateRunningDot()
+        }
         .contextMenu {
             Button(
                 thread.status == .running ? "Stop and Delete" : "Delete",
@@ -837,25 +846,94 @@ private struct ThreadRow: View {
         }
     }
 
+    private var leadingIndicator: some View {
+        ZStack {
+            if isRunning {
+                Circle()
+                    .fill(Color.harnessAccent)
+                    .opacity(reduceMotion ? 1 : runningDotOpacity)
+                    .accessibilityHidden(true)
+                    .transition(indicatorTransition)
+            } else if thread.hasUnseenResult {
+                Circle()
+                    .fill(Color.primary)
+                    .accessibilityHidden(true)
+                    .transition(indicatorTransition)
+            }
+        }
+        .frame(width: 6, height: 6)
+        .animation(indicatorAnimation, value: indicatorState)
+    }
+
+    private var indicatorState: String {
+        if isRunning { return "running" }
+        if thread.hasUnseenResult { return "unseen" }
+        return "quiet"
+    }
+
+    private var indicatorTransition: AnyTransition {
+        guard !reduceMotion else { return .opacity }
+        return .asymmetric(
+            insertion: .opacity.combined(with: .scale(scale: 0.6)),
+            removal: .opacity
+        )
+    }
+
+    private var indicatorAnimation: Animation {
+        if reduceMotion { return .easeOut(duration: 0.12) }
+        return .easeOut(duration: indicatorState == "quiet" ? 0.12 : 0.18)
+    }
+
+    @MainActor
+    private func animateRunningDot() async {
+        guard isRunning, !reduceMotion else {
+            runningDotOpacity = 1
+            return
+        }
+
+        let frameInterval = 1.0 / 12.0
+        while !Task.isCancelled {
+            runningDotOpacity = IconRenderer.MenuBarAnimation.breathingOpacity(
+                elapsed: Date().timeIntervalSince(activityClock.phaseStartedAt)
+            )
+            do {
+                try await Task.sleep(
+                    nanoseconds: UInt64(frameInterval * 1_000_000_000)
+                )
+            } catch {
+                return
+            }
+        }
+    }
+
     private var accessibilityLabel: String {
-        let newReply = thread.hasUnseenResult ? ", new reply" : ""
-        if thread.isSaved { return "\(thread.title), saved\(newReply), \(metadata)" }
-        return "\(thread.title)\(newReply), \(metadata)"
+        if thread.isSaved { return "\(thread.title), saved" }
+        return thread.title
+    }
+
+    private var accessibilityValue: String {
+        if isRunning { return "Running" }
+
+        var parts: [String] = []
+        if thread.status == .failed { parts.append("Failed") }
+        if thread.hasUnseenResult { parts.append("New reply") }
+        parts.append(ageText)
+        return parts.joined(separator: ", ")
     }
 
     private var metadata: String {
         if thread.status == .running { return "Running" }
-        let age = max(0, Date().timeIntervalSince(thread.lastConversationAt))
-        let ageText: String
-        if automaticCleanupEnabled && !thread.isSaved {
-            let remaining = Int(ceil((7 * 24 * 60 * 60 - age) / (24 * 60 * 60)))
-            if remaining <= 2 { ageText = "\(max(0, remaining))d left" }
-            else { ageText = relativeAge(age) }
-        } else {
-            ageText = relativeAge(age)
-        }
         if thread.status == .failed { return "Failed · \(ageText)" }
         return ageText
+    }
+
+    private var ageText: String {
+        let age = max(0, Date().timeIntervalSince(thread.lastConversationAt))
+        if automaticCleanupEnabled && !thread.isSaved {
+            let remaining = Int(ceil((7 * 24 * 60 * 60 - age) / (24 * 60 * 60)))
+            if remaining <= 2 { return "\(max(0, remaining))d left" }
+        }
+        return relativeAge(age)
     }
 
     private func relativeAge(_ age: TimeInterval) -> String {

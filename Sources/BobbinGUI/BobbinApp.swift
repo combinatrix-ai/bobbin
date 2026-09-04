@@ -27,10 +27,24 @@ private final class DemoRootCleanup: NSObject {
     }
 }
 
+/// One presentation-only phase origin shared by the status item and all
+/// visible thread rows. It is reset only when the aggregate running state
+/// changes from quiet to working, so opening the popover never restarts the
+/// breath and rows that start later join the existing cycle.
+@MainActor
+final class MenuBarActivityClock: ObservableObject {
+    @Published private(set) var phaseStartedAt = Date()
+
+    func reset(at date: Date) {
+        phaseStartedAt = date
+    }
+}
+
 @main
 struct BobbinApp: App {
     @StateObject private var controller: HarnessController
     @StateObject private var popoverSession = PopoverSessionState()
+    @StateObject private var activityClock = MenuBarActivityClock()
     private let demoCleanup: DemoRootCleanup?
 
     init() {
@@ -100,8 +114,13 @@ struct BobbinApp: App {
         MenuBarExtra {
             RootView(controller: controller, session: popoverSession)
                 .frame(width: 392, height: 560)
+                .environmentObject(activityClock)
         } label: {
-            MenuBarStatusLabel(controller: controller, store: controller.store)
+            MenuBarStatusLabel(
+                controller: controller,
+                store: controller.store,
+                activityClock: activityClock
+            )
         }
         .menuBarExtraStyle(.window)
     }
@@ -116,9 +135,9 @@ struct BobbinApp: App {
 private struct MenuBarStatusLabel: View {
     @ObservedObject var controller: HarnessController
     @ObservedObject var store: ThreadStore
+    @ObservedObject var activityClock: MenuBarActivityClock
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var breathingStartedAt = Date()
     @State private var settlingStartedAt: Date?
     @State private var settleFromOpacity = 1.0
     @State private var coreOpacity = 1.0
@@ -131,7 +150,8 @@ private struct MenuBarStatusLabel: View {
         [
             isWorking ? "working" : "quiet",
             reduceMotion ? "reduce-motion" : "motion",
-            isSettling ? String(settlingStartedAt!.timeIntervalSinceReferenceDate) : "settled"
+            isSettling ? String(settlingStartedAt!.timeIntervalSinceReferenceDate) : "settled",
+            String(activityClock.phaseStartedAt.timeIntervalSinceReferenceDate)
         ].joined(separator: ":")
     }
 
@@ -152,16 +172,19 @@ private struct MenuBarStatusLabel: View {
             .accessibilityLabel("Bobbin")
             .accessibilityValue(controller.statusItemAccessibilityValue)
         .onAppear {
-            breathingStartedAt = Date()
             settlingStartedAt = nil
-            coreOpacity = isWorking && reduceMotion ? 0.5 : 1
+            coreOpacity = reduceMotion
+                ? (isWorking ? 0.5 : 1)
+                : (isWorking ? breathingOpacity(at: Date()) : 1)
         }
         .onChange(of: isWorking) { wasWorking, nowWorking in
             let now = Date()
             if nowWorking {
-                breathingStartedAt = now
+                if !wasWorking {
+                    activityClock.reset(at: now)
+                }
                 settlingStartedAt = nil
-                coreOpacity = reduceMotion ? 0.5 : 1
+                coreOpacity = reduceMotion ? 0.5 : breathingOpacity(at: now)
             } else if wasWorking {
                 if reduceMotion {
                     settlingStartedAt = nil
@@ -188,8 +211,7 @@ private struct MenuBarStatusLabel: View {
                 settleFromOpacity = 1
                 coreOpacity = isWorking ? 0.5 : 1
             } else if isWorking {
-                breathingStartedAt = Date()
-                coreOpacity = 1
+                coreOpacity = breathingOpacity(at: Date())
             }
         }
         .task(id: animationTaskID) {
@@ -207,14 +229,22 @@ private struct MenuBarStatusLabel: View {
         }
 
         if isWorking {
-            let elapsed = max(0, date.timeIntervalSince(breathingStartedAt))
-            return IconRenderer.MenuBarAnimation.breathingOpacity(elapsed: elapsed)
+            return breathingOpacity(at: date)
         }
 
         guard let settlingStartedAt else { return 1 }
         return IconRenderer.MenuBarAnimation.settlingOpacity(
             from: settleFromOpacity,
             elapsed: date.timeIntervalSince(settlingStartedAt)
+        )
+    }
+
+    /// Rows use this same absolute reference clock, so the menu-bar core and
+    /// every running dot breathe in phase even when work starts at different
+    /// times. The phase itself is presentation-only; it never changes state.
+    private func breathingOpacity(at date: Date) -> Double {
+        IconRenderer.MenuBarAnimation.breathingOpacity(
+            elapsed: date.timeIntervalSince(activityClock.phaseStartedAt)
         )
     }
 
