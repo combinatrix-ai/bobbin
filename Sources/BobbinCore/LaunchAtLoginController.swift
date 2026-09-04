@@ -16,6 +16,13 @@ public protocol LaunchAtLoginService: AnyObject {
     func unregister() throws
 }
 
+@MainActor
+public protocol LaunchAtLoginDefaultStore: AnyObject {
+    var hasInitializedDefault: Bool { get }
+
+    func markDefaultInitialized()
+}
+
 /// Keeps the Settings toggle synchronized with the system login-item state.
 ///
 /// ServiceManagement remains in the GUI target; this controller owns only the
@@ -31,6 +38,22 @@ public final class LaunchAtLoginController: ObservableObject {
     public init(service: any LaunchAtLoginService) {
         self.service = service
         refresh()
+    }
+
+    /// Enables Launch at Login once for a genuinely new Bobbin installation.
+    ///
+    /// Existing installations are marked as migrated without changing their
+    /// login-item setting. The marker is written before registration so a
+    /// persistent system error cannot trigger an automatic retry every launch;
+    /// the Settings toggle remains the explicit recovery path.
+    public func initializeDefaultIfNeeded(
+        isFreshInstall: Bool,
+        store: any LaunchAtLoginDefaultStore
+    ) {
+        guard !store.hasInitializedDefault else { return }
+        store.markDefaultInitialized()
+        guard isFreshInstall else { return }
+        setEnabled(true)
     }
 
     public func refresh() {

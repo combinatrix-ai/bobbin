@@ -80,6 +80,43 @@ final class LaunchAtLoginControllerTests: XCTestCase {
         XCTAssertFalse(controller.isEnabled)
         XCTAssertTrue(controller.requiresApproval)
     }
+
+    func testFreshInstallEnablesLaunchAtLoginOnce() {
+        let service = FakeLaunchAtLoginService(status: .notRegistered)
+        let store = FakeLaunchAtLoginDefaultStore()
+        let controller = LaunchAtLoginController(service: service)
+
+        controller.initializeDefaultIfNeeded(isFreshInstall: true, store: store)
+        controller.initializeDefaultIfNeeded(isFreshInstall: true, store: store)
+
+        XCTAssertEqual(service.registerCount, 1)
+        XCTAssertEqual(store.markCount, 1)
+        XCTAssertTrue(controller.isEnabled)
+    }
+
+    func testExistingInstallIsMigratedWithoutChangingLoginItem() {
+        let service = FakeLaunchAtLoginService(status: .notRegistered)
+        let store = FakeLaunchAtLoginDefaultStore()
+        let controller = LaunchAtLoginController(service: service)
+
+        controller.initializeDefaultIfNeeded(isFreshInstall: false, store: store)
+
+        XCTAssertEqual(service.registerCount, 0)
+        XCTAssertEqual(store.markCount, 1)
+        XCTAssertFalse(controller.isEnabled)
+    }
+
+    func testInitializedPreferenceDoesNotApplyFreshInstallDefaultAgain() {
+        let service = FakeLaunchAtLoginService(status: .notRegistered)
+        let store = FakeLaunchAtLoginDefaultStore(hasInitializedDefault: true)
+        let controller = LaunchAtLoginController(service: service)
+
+        controller.initializeDefaultIfNeeded(isFreshInstall: true, store: store)
+
+        XCTAssertEqual(service.registerCount, 0)
+        XCTAssertEqual(store.markCount, 0)
+        XCTAssertFalse(controller.isEnabled)
+    }
 }
 
 @MainActor
@@ -104,5 +141,20 @@ private final class FakeLaunchAtLoginService: LaunchAtLoginService {
         unregisterCount += 1
         if let unregisterError { throw unregisterError }
         status = .notRegistered
+    }
+}
+
+@MainActor
+private final class FakeLaunchAtLoginDefaultStore: LaunchAtLoginDefaultStore {
+    var hasInitializedDefault: Bool
+    private(set) var markCount = 0
+
+    init(hasInitializedDefault: Bool = false) {
+        self.hasInitializedDefault = hasInitializedDefault
+    }
+
+    func markDefaultInitialized() {
+        hasInitializedDefault = true
+        markCount += 1
     }
 }

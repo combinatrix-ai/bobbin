@@ -341,9 +341,7 @@ private struct SettingsMenu: View {
     @ObservedObject var controller: HarnessController
     let openSystemPrompt: () -> Void
 
-    @StateObject private var launchAtLogin = LaunchAtLoginController(
-        service: SystemLaunchAtLoginService()
-    )
+    @ObservedObject private var launchAtLogin = AppLaunchAtLogin.controller
     @State private var showingCleanupConfirmation = false
     @State private var awaitingCleanupScan = false
 

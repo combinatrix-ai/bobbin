@@ -71,7 +71,15 @@ struct BobbinApp: App {
                 self.demoCleanup = cleanup
                 _controller = StateObject(wrappedValue: controller)
             } else {
+                let paths = try HarnessPaths()
+                let isFreshInstall = !FileManager.default.fileExists(
+                    atPath: paths.root.path
+                )
                 let controller = try HarnessController()
+                AppLaunchAtLogin.controller.initializeDefaultIfNeeded(
+                    isFreshInstall: isFreshInstall,
+                    store: AppLaunchAtLogin.defaultStore
+                )
                 self.demoCleanup = nil
                 _controller = StateObject(wrappedValue: controller)
             }
