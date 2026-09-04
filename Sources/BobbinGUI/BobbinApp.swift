@@ -109,9 +109,10 @@ struct BobbinApp: App {
 
 /// The status item has two independent signals: the central core breathes
 /// while one or more turns run, and a single lower-right dot marks any unseen
-/// completed result. TimelineView is scoped to this tiny label, preserving the
-/// existing MenuBarExtra window/popover behavior while providing a steady
-/// 12-frame-per-second alpha animation.
+/// completed result. The direct Image is kept as the effective MenuBarExtra
+/// label root because AppKit needs a concrete intrinsic-size image to create a
+/// visible status item. A conditional task swaps only the core alpha while a
+/// turn is running or settling; idle labels have no recurring timer.
 private struct MenuBarStatusLabel: View {
     @ObservedObject var controller: HarnessController
     @ObservedObject var store: ThreadStore
@@ -120,83 +121,83 @@ private struct MenuBarStatusLabel: View {
     @State private var breathingStartedAt = Date()
     @State private var settlingStartedAt: Date?
     @State private var settleFromOpacity = 1.0
+    @State private var coreOpacity = 1.0
+
+    private var isWorking: Bool { store.hasRunningThread }
+    private var hasUnseenResult: Bool { store.hasUnseenResults }
+    private var isSettling: Bool { settlingStartedAt != nil }
+
+    private var animationTaskID: String {
+        [
+            isWorking ? "working" : "quiet",
+            reduceMotion ? "reduce-motion" : "motion",
+            isSettling ? String(settlingStartedAt!.timeIntervalSinceReferenceDate) : "settled"
+        ].joined(separator: ":")
+    }
 
     var body: some View {
-        let isWorking = store.hasRunningThread
-        let hasUnseen = store.hasUnseenResults
-        let isSettling = settlingStartedAt != nil
-
-        // TimelineView is paused between lifecycle changes. The one-hour
-        // fallback keeps the label eligible for a future scene refresh but
-        // avoids a permanent 12 Hz wakeup while Bobbin is idle. Reduce Motion
-        // also pauses the animation because its working core is static.
-        let isAnimating = (!reduceMotion && isWorking) || isSettling
-        let interval = 1.0 / 12.0
-        TimelineView(.periodic(from: Date(), by: isAnimating ? interval : 3_600)) { context in
-            let opacity = coreOpacity(
-                at: context.date,
-                isWorking: isWorking,
-                reduceMotion: reduceMotion
+        // Keep Image as the actual root view. In particular, do not put a
+        // TimelineView or an empty Group around it: MenuBarExtra uses this
+        // intrinsic image to measure and install its NSStatusItem.
+        Image(
+            nsImage: IconRenderer.menuBarImage(
+                state: IconRenderer.MenuBarIconState(
+                    isWorking: isWorking,
+                    hasUnseenResult: hasUnseenResult,
+                    coreOpacity: coreOpacity
+                )
             )
-            let state = IconRenderer.MenuBarIconState(
-                isWorking: isWorking,
-                hasUnseenResult: hasUnseen,
-                coreOpacity: opacity
-            )
-
-            Image(nsImage: IconRenderer.menuBarImage(state: state))
-                .renderingMode(.template)
-                .accessibilityLabel("Bobbin")
-                .accessibilityValue(controller.statusItemAccessibilityValue)
-        }
+        )
+            .renderingMode(.template)
+            .accessibilityLabel("Bobbin")
+            .accessibilityValue(controller.statusItemAccessibilityValue)
         .onAppear {
             breathingStartedAt = Date()
             settlingStartedAt = nil
+            coreOpacity = isWorking && reduceMotion ? 0.5 : 1
         }
         .onChange(of: isWorking) { wasWorking, nowWorking in
             let now = Date()
             if nowWorking {
                 breathingStartedAt = now
                 settlingStartedAt = nil
+                coreOpacity = reduceMotion ? 0.5 : 1
             } else if wasWorking {
                 if reduceMotion {
                     settlingStartedAt = nil
                     settleFromOpacity = 1
+                    coreOpacity = 1
                     return
                 }
                 // Preserve the alpha at the moment the final turn stopped,
                 // then ease to the quiet full-opacity core in <=400 ms.
-                settleFromOpacity = coreOpacity(
+                settleFromOpacity = opacity(
                     at: now,
                     isWorking: true,
-                    reduceMotion: reduceMotion
+                    reduceMotion: false
                 )
                 settlingStartedAt = now
             }
         }
         .onChange(of: reduceMotion) { _, nowReduced in
-            guard isWorking else { return }
             if nowReduced {
+                // Reduce Motion also cancels an in-flight settle. Otherwise a
+                // settle started before the preference changed could leave
+                // the task paused forever with a partially faded core.
                 settlingStartedAt = nil
-            } else {
+                settleFromOpacity = 1
+                coreOpacity = isWorking ? 0.5 : 1
+            } else if isWorking {
                 breathingStartedAt = Date()
+                coreOpacity = 1
             }
         }
-        .task(id: settlingStartedAt) {
-            guard settlingStartedAt != nil else { return }
-            do {
-                try await Task.sleep(
-                    nanoseconds: UInt64(IconRenderer.MenuBarAnimation.settleDuration * 1_000_000_000)
-                )
-            } catch {
-                return
-            }
-            guard !Task.isCancelled else { return }
-            self.settlingStartedAt = nil
+        .task(id: animationTaskID) {
+            await runAnimationLoop()
         }
     }
 
-    private func coreOpacity(
+    private func opacity(
         at date: Date,
         isWorking: Bool,
         reduceMotion: Bool
@@ -215,5 +216,59 @@ private struct MenuBarStatusLabel: View {
             from: settleFromOpacity,
             elapsed: date.timeIntervalSince(settlingStartedAt)
         )
+    }
+
+    @MainActor
+    private func runAnimationLoop() async {
+        guard !reduceMotion else {
+            coreOpacity = isWorking ? 0.5 : 1
+            return
+        }
+
+        guard isWorking || isSettling else {
+            coreOpacity = 1
+            return
+        }
+
+        let frameInterval = 1.0 / 12.0
+        while !Task.isCancelled {
+            let now = Date()
+            if isWorking {
+                coreOpacity = opacity(
+                    at: now,
+                    isWorking: true,
+                    reduceMotion: false
+                )
+            } else if let startedAt = settlingStartedAt {
+                let elapsed = max(0, now.timeIntervalSince(startedAt))
+                coreOpacity = IconRenderer.MenuBarAnimation.settlingOpacity(
+                    from: settleFromOpacity,
+                    elapsed: elapsed
+                )
+                if elapsed >= IconRenderer.MenuBarAnimation.settleDuration {
+                    coreOpacity = 1
+                    settlingStartedAt = nil
+                    return
+                }
+            } else {
+                coreOpacity = 1
+                return
+            }
+
+            let remaining = isWorking
+                ? frameInterval
+                : max(
+                    0,
+                    IconRenderer.MenuBarAnimation.settleDuration
+                        - now.timeIntervalSince(settlingStartedAt ?? now)
+                )
+            do {
+                try await Task.sleep(
+                    nanoseconds: UInt64(min(frameInterval, remaining) * 1_000_000_000)
+                )
+            } catch {
+                return
+            }
+        }
     }
 }
