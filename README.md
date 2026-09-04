@@ -98,7 +98,7 @@ swift test
 
 The packaging script creates an ad-hoc signed `Bobbin.app`. Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which tests, builds a universal app, signs it with Developer ID, notarizes its ZIP and DMG with Apple, signs the Sparkle update, and publishes the GitHub Release. The tag must match `CFBundleShortVersionString`, and `CFBundleVersion` must be a positive, monotonically increasing build number.
 
-The release workflow requires these repository secrets: `BUILD_CERTIFICATE_BASE64`, `P12_PASSWORD`, `APPLE_ID`, `NOTARY_PASSWORD`, and `SPARKLE_ED_PRIVATE_KEY`. Existing tags can be released through **Run workflow** by supplying the tag. `scripts/release.sh` remains available as the local fallback and uses the same packaging and verification path.
+The release workflow uses a manually approved `release` environment restricted to `main` and `v*` tags. It requires these environment secrets: `BUILD_CERTIFICATE_BASE64`, `P12_PASSWORD`, `APPLE_ID`, `NOTARY_PASSWORD`, and `SPARKLE_ED_PRIVATE_KEY`. Existing tags can be released through **Run workflow** by supplying the tag. `scripts/release.sh` remains available as the local fallback and uses the same packaging and verification path.
 
 Release builds use Sparkle to check the signed `appcast.xml` attached to the latest GitHub Release once per day. The Settings menu also provides **Check for Updates…** for an immediate check.
 
