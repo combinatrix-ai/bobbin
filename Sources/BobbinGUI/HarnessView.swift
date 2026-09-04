@@ -951,7 +951,7 @@ private struct ConversationView: View {
     let back: () -> Void
 
     @State private var prompt = ""
-    @State private var composerFocused = false
+    @State private var composerFocused = true
     @State private var showingServerDetail = false
     @State private var editingMessageID: UUID?
     @State private var editDraft = ""

@@ -86,9 +86,6 @@ private struct IMEAwareComposerTextView: NSViewRepresentable {
             context.coordinator.requestFocusIfNeeded(for: view.textView)
         } else {
             context.coordinator.resetFocusRequest()
-            if view.window?.firstResponder === view.textView {
-                view.window?.makeFirstResponder(nil)
-            }
         }
 
         if !isEnabled, view.window?.firstResponder === view.textView {
