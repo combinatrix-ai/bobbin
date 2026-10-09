@@ -64,6 +64,14 @@ Review modes map to the app-server like this:
 - Supports multiple disposable threads, sorted by recent conversation time.
 - Uses a template menu bar icon that adapts to light and dark menu bars.
 
+## Computer Use
+
+Bobbin loads the official native Computer Use plugin from `/Applications/ChatGPT.app`, or from `/Applications/Codex.app` when that distribution is available. It verifies the OpenAI signatures and installs an owned copy of the native service inside Bobbin's isolated `CodexHome`. The plugin enables computer control only. It does not import desktop authentication, browser sessions, or browser automation.
+
+When Codex requests access to an app, Bobbin shows the native request above that chat's composer. Choose **Decline** or **Allow for this chat**. Review mode does not grant native app access. Requests expire after five minutes and are cancelled when the chat stops, completes, is deleted, or the server restarts. macOS permission prompts still require your decision.
+
+Settings shows whether Computer Use is ready, disabled, unavailable, or failed. Explicit plugin disables and existing Computer Use server or tool restrictions remain in force. Computer Use failures do not prevent normal conversations when a Codex CLI is available. Restart the app-server to adopt a desktop update.
+
 ## Demo mode
 
 Demo mode provides deterministic content for product screenshots and safe UI walkthroughs.
@@ -71,6 +79,8 @@ Demo mode provides deterministic content for product screenshots and safe UI wal
 Launch with `--demo-mode` or `BOBBIN_DEMO_MODE=1`. Bobbin uses a throwaway directory under the system temporary directory and removes it on termination. It does not start `codex app-server`.
 
 To show specific content, pass `--demo-data /path/to/state.json` or set `BOBBIN_DEMO_DATA`. This also enables demo mode. The file uses Bobbin's normal `state.json` format, so there is no second fixture schema to maintain.
+
+Launch with `--demo-computer-use` to show a deterministic Calculator approval in the built-in demo. This mode also keeps the production app-server stopped.
 
 ## Storage
 
@@ -88,13 +98,21 @@ The seven-day cleanup calls `thread/delete` and drops the thread from `state.jso
 
 ## Build and test
 
-Bobbin requires macOS 14 or later and a Codex CLI at one of the supported local install paths.
+Bobbin requires macOS 14 or later and either a supported OpenAI desktop installation or a Codex CLI at one of the supported local install paths.
 
 ```sh
 swift build
 swift test
 ./scripts/build-app.sh /path/to/output-directory
 ```
+
+To test the installed native runtime without a model API call, run:
+
+```sh
+BOBBIN_NATIVE_COMPUTER_USE_SMOKE=1 swift test --filter ComputerUseNativeSmokeTests
+```
+
+The smoke test creates a fresh temporary home, lists native apps, and explicitly declines the Calculator access request. It does not copy credentials or start a model turn. Run it outside a shell sandbox that blocks Apple signature verification. The test prints its isolated home path and leaves that home available for inspection.
 
 The packaging script creates an ad-hoc signed `Bobbin.app`. Pushing a `vX.Y.Z` tag runs `.github/workflows/release.yml`, which tests, builds a universal app, signs it with Developer ID, notarizes its ZIP and DMG with Apple, signs the Sparkle update, and publishes the GitHub Release. The tag must match `CFBundleShortVersionString`, and `CFBundleVersion` must be a positive, monotonically increasing build number.
 

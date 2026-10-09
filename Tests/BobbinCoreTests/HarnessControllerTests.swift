@@ -969,6 +969,8 @@ final class HarnessControllerTests: XCTestCase {
 }
 
 private final class RecordingAppServerClient: HarnessAppServerClient {
+    var onComputerUseApproval: CodexAppServerClient.ApprovalHandler?
+    func respond(to token: ServerRequestToken, decision: ComputerUseDecision) {}
     typealias ResponseHandler = (
         _ method: String,
         _ params: CodexAppServerClient.JSONObject?

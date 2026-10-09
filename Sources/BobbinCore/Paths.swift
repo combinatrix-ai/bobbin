@@ -19,9 +19,16 @@ public struct HarnessPaths: Sendable {
             resolvedRoot = appSupport.appendingPathComponent("Bobbin", isDirectory: true)
         }
 
-        self.root = resolvedRoot
-        self.stateFile = resolvedRoot.appendingPathComponent("state.json")
-        self.codexHome = resolvedRoot.appendingPathComponent("CodexHome", isDirectory: true)
+        let path = resolvedRoot.standardized.path
+        let canonicalRoot: URL
+        if path.hasPrefix("/var/") || path.hasPrefix("/tmp/") {
+            canonicalRoot = URL(fileURLWithPath: "/private" + path, isDirectory: true)
+        } else {
+            canonicalRoot = resolvedRoot.standardized
+        }
+        self.root = canonicalRoot
+        self.stateFile = canonicalRoot.appendingPathComponent("state.json")
+        self.codexHome = canonicalRoot.appendingPathComponent("CodexHome", isDirectory: true)
     }
 
     /// Prefix for demo roots. Deletion is gated on it, so cleanup can never
@@ -40,9 +47,11 @@ public struct HarnessPaths: Sendable {
 
     /// True only for a root this process could have created for a demo run.
     public var isDemoRoot: Bool {
-        let temporary = FileManager.default.temporaryDirectory.standardizedFileURL.path
+        let temporary = FileManager.default.temporaryDirectory.standardized.path
+        let canonicalTemporary = temporary.hasPrefix("/var/") || temporary.hasPrefix("/tmp/")
+            ? "/private" + temporary : temporary
         return root.lastPathComponent.hasPrefix(Self.demoRootPrefix)
-            && root.standardizedFileURL.path.hasPrefix(temporary)
+            && root.deletingLastPathComponent().path == canonicalTemporary
     }
 
     /// Removes a demo root, and refuses to remove anything else.
@@ -54,14 +63,11 @@ public struct HarnessPaths: Sendable {
     public func prepare() throws {
         try createPrivateDirectory(root)
         try createPrivateDirectory(codexHome)
+        try OwnedComputerUseDirectory(root).assertRegularFileOrAbsent("state.json")
+        try OwnedComputerUseDirectory(codexHome).assertRegularFileOrAbsent("config.toml")
     }
 
     private func createPrivateDirectory(_ url: URL) throws {
-        try FileManager.default.createDirectory(
-            at: url,
-            withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700]
-        )
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
+        _ = try OwnedComputerUseDirectory(url, create: true)
     }
 }

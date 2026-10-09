@@ -252,7 +252,8 @@ private struct ThreadListView: View {
                                 select: { open(thread.id) },
                                 save: { controller.saveThread(thread.id) },
                                 delete: { controller.deleteThread(thread.id) },
-                                automaticCleanupEnabled: controller.automaticCleanupEnabled
+                                automaticCleanupEnabled: controller.automaticCleanupEnabled,
+                                needsApproval: controller.pendingComputerUseApproval(for: thread.id) != nil
                             )
                         }
 
@@ -444,6 +445,7 @@ private struct SettingsMenu: View {
                 // Status lives here, on demand, rather than as a permanent
                 // light on the main surface.
                 Text("Server: \(controller.serverState.settingsLabel)")
+                Text("Computer Use: \(controller.computerUseState.settingsLabel)")
                 if !controller.isDemoMode {
                     Button("Restart app-server", action: controller.restart)
                 }
@@ -750,6 +752,7 @@ private struct ThreadRow: View {
     let save: () -> Void
     let delete: () -> Void
     let automaticCleanupEnabled: Bool
+    let needsApproval: Bool
 
     init(
         thread: HarnessThread,
@@ -757,7 +760,8 @@ private struct ThreadRow: View {
         select: @escaping () -> Void,
         save: @escaping () -> Void,
         delete: @escaping () -> Void,
-        automaticCleanupEnabled: Bool = true
+        automaticCleanupEnabled: Bool = true,
+        needsApproval: Bool = false
     ) {
         self.thread = thread
         self.opacity = opacity
@@ -765,6 +769,7 @@ private struct ThreadRow: View {
         self.save = save
         self.delete = delete
         self.automaticCleanupEnabled = automaticCleanupEnabled
+        self.needsApproval = needsApproval
     }
 
     @State private var isHovering = false
@@ -797,7 +802,7 @@ private struct ThreadRow: View {
 
                     Spacer(minLength: 3)
 
-                    Text(metadata)
+                    Text(needsApproval ? "Needs approval" : metadata)
                         .font(.system(size: 10, weight: .regular))
                         .foregroundStyle(.tertiary)
                         .lineLimit(1)
@@ -985,6 +990,28 @@ private struct ConversationView: View {
 
                 Divider()
                 messageList(thread)
+                if let pending = controller.pendingComputerUseApproval(for: thread.id) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(pending.approval.message).font(.system(size: 12, weight: .semibold))
+                        if let subtitle = pending.approval.subtitle {
+                            Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
+                        }
+                        Text("Computer Use can view and control this app for this chat.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
+                        HStack {
+                            Spacer()
+                            Button("Decline") { controller.resolveComputerUseApproval(pending.id, decision: .decline) }
+                            Button("Allow for this chat") { controller.resolveComputerUseApproval(pending.id, decision: .allowForChat) }
+                                .buttonStyle(.borderedProminent)
+                        }
+                        .controlSize(.small)
+                    }
+                    .padding(12)
+                    .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
+                    .accessibilityIdentifier("computer-use-approval")
+                }
                 composer(thread)
             }
         } else {

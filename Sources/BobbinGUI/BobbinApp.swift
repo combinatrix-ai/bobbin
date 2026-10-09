@@ -82,6 +82,7 @@ struct BobbinApp: App {
                     fixture: fixture,
                     error: dataError
                 )
+                if options.demoComputerUse { controller.showDemoComputerUseApproval() }
                 self.demoCleanup = cleanup
                 _controller = StateObject(wrappedValue: controller)
             } else {
