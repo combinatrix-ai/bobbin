@@ -100,10 +100,38 @@ final class HarnessControllerTests: XCTestCase {
         )
         XCTAssertEqual(startRequest.params?["model"] as? String, "gpt-5.6-terra")
         XCTAssertEqual(startRequest.params?["cwd"] as? String, "/tmp/defaults-project")
-        XCTAssertEqual(
-            startRequest.params?["developerInstructions"] as? String,
-            "Keep the first turn concise."
-        )
+        let instructions = try XCTUnwrap(startRequest.params?["developerInstructions"] as? String)
+        XCTAssertTrue(instructions.contains("mcp__cua_repl"))
+        XCTAssertTrue(instructions.hasSuffix(created.systemPrompt))
+        XCTAssertEqual(controller.store.state.defaultSystemPrompt, created.systemPrompt)
+    }
+
+    func testSendToExistingThreadRefreshesComputerUseInstructions() async throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        let client = RecordingAppServerClient()
+        let controller = try HarnessController(testPaths: fixture.paths, appServerClient: client)
+        let threadID = try XCTUnwrap(controller.store.state.selectedThreadID)
+        let prompt = "Keep my existing instructions verbatim.\n"
+        try controller.store.update(threadID) { thread in
+            thread.codexThreadID = "existing-thread"
+            thread.status = .done
+            thread.systemPrompt = prompt
+        }
+        let turnStarted = expectation(description: "resumed turn is requested")
+        client.onTurnStart = { turnStarted.fulfill() }
+
+        controller.send("Mac標準の電卓アプリで計算して", in: threadID)
+        await fulfillment(of: [turnStarted], timeout: 2)
+
+        XCTAssertEqual(client.requests.map(\.method), ["thread/resume", "turn/start"])
+        let resume = try XCTUnwrap(client.requests.first(where: { $0.method == "thread/resume" }))
+        let instructions = try XCTUnwrap(resume.params?["developerInstructions"] as? String)
+        XCTAssertTrue(instructions.contains("mcp__cua_repl"))
+        XCTAssertTrue(instructions.hasSuffix(prompt))
+        XCTAssertEqual(controller.store.state.threads.first(where: { $0.id == threadID })?.systemPrompt, prompt)
+        let reloaded = try ThreadStore(paths: fixture.paths)
+        XCTAssertEqual(reloaded.state.threads.first(where: { $0.id == threadID })?.systemPrompt, prompt)
     }
 
     func testCreateThreadAndSendIgnoresEmptyAndWhitespaceOnlyText() throws {
@@ -414,6 +442,7 @@ final class HarnessControllerTests: XCTestCase {
             thread.codexThreadID = "original-thread"
             thread.status = .done
             thread.reviewMode = .allowAll
+            thread.systemPrompt = "Keep the instructions when editing a message."
             thread.messages = [firstUser, firstAssistant, secondUser, secondAssistant]
             thread.toolCalls = [keptCall, removedCall]
         }
@@ -452,6 +481,9 @@ final class HarnessControllerTests: XCTestCase {
         XCTAssertEqual(fork.params?["threadId"] as? String, "original-thread")
         XCTAssertEqual(fork.params?["lastTurnId"] as? String, "turn-1")
         XCTAssertEqual(fork.params?["sandbox"] as? String, "danger-full-access")
+        let forkInstructions = try XCTUnwrap(fork.params?["developerInstructions"] as? String)
+        XCTAssertTrue(forkInstructions.contains("mcp__cua_repl"))
+        XCTAssertTrue(forkInstructions.hasSuffix("Keep the instructions when editing a message."))
         let turn = try XCTUnwrap(client.requests.first(where: { $0.method == "turn/start" }))
         let input = try XCTUnwrap(turn.params?["input"] as? [[String: Any]])
         XCTAssertEqual(input.first?["text"] as? String, "replacement")

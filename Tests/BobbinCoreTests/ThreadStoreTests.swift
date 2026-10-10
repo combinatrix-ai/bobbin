@@ -442,20 +442,24 @@ final class ThreadStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testSystemPromptIsForwardedToThreadStartOnly() throws {
+    func testComputerUseAndCustomInstructionsReachStartAndResume() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
         var thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
         thread.systemPrompt = "Keep replies concise."
 
         let start = HarnessController.threadStartParameters(for: thread)
-        XCTAssertEqual(start["developerInstructions"] as? String, thread.systemPrompt)
+        let instructions = try XCTUnwrap(start["developerInstructions"] as? String)
+        XCTAssertTrue(instructions.contains("Computer Use"))
+        XCTAssertTrue(instructions.contains("mcp__cua_repl"))
+        XCTAssertTrue(instructions.hasSuffix(thread.systemPrompt))
 
         let resume = HarnessController.threadResumeParameters(
             threadID: "codex-thread",
             thread: thread
         )
-        XCTAssertNil(resume["developerInstructions"])
+        XCTAssertEqual(resume["developerInstructions"] as? String, instructions)
+        XCTAssertEqual(thread.systemPrompt, "Keep replies concise.")
 
         let turn = HarnessController.turnStartParameters(
             threadID: "codex-thread",
@@ -466,21 +470,28 @@ final class ThreadStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testWhitespaceOnlySystemPromptIsOmittedFromStartAndResumeParameters() throws {
+    func testEmptyCustomPromptKeepsComputerUseInstructionsWithoutChangingStoredPrompt() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
         var thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
 
+        var sharedInstructions: String?
         for prompt in ["", " \n\t "] {
             thread.systemPrompt = prompt
             let start = HarnessController.threadStartParameters(for: thread)
-            XCTAssertNil(start["developerInstructions"])
+            let instructions = try XCTUnwrap(start["developerInstructions"] as? String)
+            XCTAssertTrue(instructions.contains("mcp__cua_repl"))
+            if let sharedInstructions {
+                XCTAssertEqual(instructions, sharedInstructions)
+            }
+            sharedInstructions = instructions
 
             let resume = HarnessController.threadResumeParameters(
                 threadID: "codex-thread",
                 thread: thread
             )
-            XCTAssertNil(resume["developerInstructions"])
+            XCTAssertEqual(resume["developerInstructions"] as? String, instructions)
+            XCTAssertEqual(thread.systemPrompt, prompt)
         }
     }
 

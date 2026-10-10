@@ -592,6 +592,18 @@ public final class HarnessController: ObservableObject {
         store.opacity(for: thread, now: now)
     }
 
+    private static let computerUseInstructions = """
+    Computer Use means reading and operating Mac app UIs. The official tool is js in the mcp__cua_repl namespace (mcp__cua_repl.js), exposed directly to you.
+
+    - When the user asks to launch or operate a Mac app's UI, use that native Computer Use tool.
+    - Call it directly. It is not inside functions.exec and is not in ALL_TOOLS. Do not send CUA code to functions.exec or a shell.
+    - Follow the tool's first-call rule: one entry API call, then read its returned documentation and UI state. For a specified Mac app, use cua.getApp. Use only documented APIs.
+    - Do not use osascript, AppleScript, JXA, System Events, or shell-driven UI automation for that app operation.
+    - Read the target app's UI after the final action and verify the actual outcome before claiming completion. A typed calculator expression alone is not a calculated result.
+    - If the official tool is unavailable or access is refused, stop that UI task and report the reason. Do not switch to another UI automation method.
+    - These UI rules do not restrict shell commands for ordinary file or code tasks.
+    """
+
     static func threadStartParameters(for thread: HarnessThread) -> [String: Any] {
         var parameters: [String: Any] = [
             "model": thread.model,
@@ -601,7 +613,7 @@ public final class HarnessController: ObservableObject {
             "sandbox": thread.reviewMode.sandboxMode,
             "serviceName": "bobbin"
         ]
-        addSystemPromptParameter(to: &parameters, for: thread)
+        addDeveloperInstructions(to: &parameters, for: thread)
         return parameters
     }
 
@@ -613,22 +625,24 @@ public final class HarnessController: ObservableObject {
         threadID: String,
         thread: HarnessThread
     ) -> [String: Any] {
-        [
+        var parameters: [String: Any] = [
             "threadId": threadID,
             "approvalPolicy": thread.reviewMode.approvalPolicy,
             "approvalsReviewer": thread.reviewMode.approvalsReviewer,
             "sandbox": thread.reviewMode.sandboxMode
         ]
+        addDeveloperInstructions(to: &parameters, for: thread)
+        return parameters
     }
 
-    private static func addSystemPromptParameter(
+    private static func addDeveloperInstructions(
         to parameters: inout [String: Any],
         for thread: HarnessThread
     ) {
-        guard !thread.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return
-        }
-        parameters["developerInstructions"] = thread.systemPrompt
+        let hasCustomPrompt = !thread.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        parameters["developerInstructions"] = hasCustomPrompt
+            ? computerUseInstructions + "\n\n" + thread.systemPrompt
+            : computerUseInstructions
     }
 
     static func turnStartParameters(

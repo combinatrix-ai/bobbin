@@ -68,6 +68,8 @@ Review modes map to the app-server like this:
 
 Bobbin loads the official native Computer Use plugin from `/Applications/ChatGPT.app`, or from `/Applications/Codex.app` when that distribution is available. It verifies the OpenAI signatures and installs an owned copy of the native service inside Bobbin's isolated `CodexHome`. The plugin enables computer control only. It does not import desktop authentication, browser sessions, or browser automation.
 
+Bobbin supplies a common instruction for Mac app UI requests, so you can ask "Open Calculator and calculate 200 × 1236" without naming a tool. Codex is instructed to use the official Computer Use tool directly and confirm the result in the app. The instruction also reaches resumed and forked chats while preserving your custom system prompt. If the tool is unavailable or access is refused, Codex is instructed to report the reason and stop that UI task.
+
 When Codex requests access to an app, Bobbin shows the native request above that chat's composer. Choose **Decline** or **Allow for this chat**. Review mode does not grant native app access. Requests expire after five minutes and are cancelled when the chat stops, completes, is deleted, or the server restarts. macOS permission prompts still require your decision.
 
 Settings shows whether Computer Use is ready, disabled, unavailable, or failed. Explicit plugin disables and existing Computer Use server or tool restrictions remain in force. Computer Use failures do not prevent normal conversations when a Codex CLI is available. Restart the app-server to adopt a desktop update.
