@@ -1,0 +1,38 @@
+{
+  "method": "mcpServer/elicitation/request",
+  "id": 0,
+  "params": {
+    "threadId": "tool-fixture-thread",
+    "turnId": "tool-fixture-turn",
+    "serverName": "cua_repl",
+    "mode": "form",
+    "message": "Allow the cua_repl MCP server to run tool \"js\"?",
+    "requestedSchema": {
+      "type": "object",
+      "properties": {}
+    },
+    "_meta": {
+      "codex_approval_kind": "mcp_tool_call",
+      "tool_params": {
+        "code": "let app = await cua.getApp(\"/System/Applications/Calculator.app\");",
+        "title": "電卓を開く"
+      },
+      "tool_params_display": [
+        {
+          "name": "code",
+          "value": "let app = await cua.getApp(\"/System/Applications/Calculator.app\");",
+          "display_name": "code"
+        },
+        {
+          "name": "title",
+          "value": "電卓を開く",
+          "display_name": "title"
+        }
+      ],
+      "persist": [
+        "session",
+        "always"
+      ]
+    }
+  }
+}

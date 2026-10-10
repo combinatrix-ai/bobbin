@@ -26,7 +26,12 @@ final class ComputerUseNativeSmokeTests: XCTestCase {
         let declined = expectation(description: "native Calculator prompt explicitly declined")
         client.onComputerUseApproval = { token, approval in
             XCTAssertEqual(approval.threadID, threadID)
-            XCTAssertEqual(approval.appIdentifier, "com.apple.calculator")
+            guard case .nativeApp(let identifier, _) = approval.target else {
+                XCTFail("Expected native Calculator access approval")
+                client.respond(to: token, decision: .decline)
+                return
+            }
+            XCTAssertEqual(identifier, "com.apple.calculator")
             client.respond(to: token, decision: .decline)
             declined.fulfill()
         }

@@ -996,7 +996,7 @@ private struct ConversationView: View {
                         if let subtitle = pending.approval.subtitle {
                             Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary)
                         }
-                        Text("Computer Use can view and control this app for this chat.")
+                        Text(pending.approval.scopeExplanation)
                             .font(.system(size: 11)).foregroundStyle(.secondary)
                         HStack {
                             Spacer()

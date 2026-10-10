@@ -8,11 +8,20 @@ func nativeApprovalParameters() throws -> [String: Any] {
     return try XCTUnwrap(fixture["params"] as? [String: Any])
 }
 
+func toolApprovalParameters() throws -> [String: Any] {
+    let url = try XCTUnwrap(Bundle.module.url(forResource: "tool-execution-approval", withExtension: "json", subdirectory: "Fixtures"))
+    let fixture = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+    return try XCTUnwrap(fixture["params"] as? [String: Any])
+}
+
 final class ComputerUseApprovalTests: XCTestCase {
+    func testCapturedToolApprovalReachesApprovalHandling() throws {
+        XCTAssertNotNil(ComputerUseApproval(method: "mcpServer/elicitation/request", params: try toolApprovalParameters()), "Captured cua_repl.js tool approval must reach chat approval handling")
+    }
+
     func testExactNativeFixtureAndSessionOnlyResponse() throws {
         let approval = try XCTUnwrap(ComputerUseApproval(method: "mcpServer/elicitation/request", params: nativeApprovalParameters()))
-        XCTAssertEqual(approval.appIdentifier, "com.apple.calculator")
-        XCTAssertEqual(approval.appName, "Calculator")
+        XCTAssertEqual(approval.target, .nativeApp(identifier: "com.apple.calculator", name: "Calculator"))
         XCTAssertNil(approval.turnID)
         let accepted = ComputerUseDecision.allowForChat.result
         XCTAssertEqual(accepted["action"] as? String, "accept")
@@ -47,6 +56,53 @@ final class ComputerUseApprovalTests: XCTestCase {
         meta = original["_meta"] as! [String: Any]; meta["subtitle"] = "This app can access private files."
         warning["_meta"] = meta
         XCTAssertEqual(ComputerUseApproval(method: "mcpServer/elicitation/request", params: warning)?.subtitle, "This app can access private files.")
+    }
+
+    func testToolApprovalHasDistinctTargetAndOptionalArguments() throws {
+        var params = try toolApprovalParameters()
+        var meta = params["_meta"] as! [String: Any]
+        let code = (meta["tool_params"] as! [String: Any])["code"] as! String
+        for arguments: [String: Any] in [["code": code], ["code": code, "title": "", "timeout_ms": 1000]] {
+            meta["tool_params"] = arguments
+            params["_meta"] = meta
+            let approval = try XCTUnwrap(ComputerUseApproval(method: "mcpServer/elicitation/request", params: params))
+            XCTAssertEqual(approval.target, .toolExecution(code: code))
+            XCTAssertEqual(approval.turnID, "tool-fixture-turn")
+        }
+    }
+
+    func testMalformedNativeAndUnknownToolsCannotFallThroughToToolApproval() throws {
+        let original = try toolApprovalParameters()
+        let code = ((original["_meta"] as! [String: Any])["tool_params"] as! [String: Any])["code"] as! String
+        for arguments: [String: Any] in [
+            [:], ["code": 42], ["code": " "], ["code": code, "title": false],
+            ["code": code, "timeout_ms": true], ["code": code, "timeout_ms": 1.5],
+            ["code": code, "timeout_ms": 0], ["code": code, "timeout_ms": NSNull()],
+            ["code": code, "app": "com.apple.calculator"], ["code": code, "unknown": "value"]
+        ] {
+            var params = original
+            var meta = params["_meta"] as! [String: Any]
+            meta["tool_params"] = arguments
+            params["_meta"] = meta
+            XCTAssertNil(ComputerUseApproval(method: "mcpServer/elicitation/request", params: params))
+        }
+        for marker: Any in ["computer-use", "audio", NSNull()] {
+            var params = original
+            var meta = params["_meta"] as! [String: Any]
+            meta["connector_id"] = marker
+            params["_meta"] = meta
+            XCTAssertNil(ComputerUseApproval(method: "mcpServer/elicitation/request", params: params))
+        }
+        var unknown = original
+        unknown["message"] = "Allow the cua_repl MCP server to run another tool?"
+        XCTAssertNil(ComputerUseApproval(method: "mcpServer/elicitation/request", params: unknown))
+        var native = try nativeApprovalParameters()
+        var meta = native["_meta"] as! [String: Any]
+        meta.removeValue(forKey: "connector_id")
+        meta["tool_params"] = ["app": "com.apple.calculator", "code": code]
+        native["_meta"] = meta
+        native["message"] = original["message"]
+        XCTAssertNil(ComputerUseApproval(method: "mcpServer/elicitation/request", params: native))
     }
 
     func testRPCIDsKeepKindsAndRejectInvalidJSONTypes() throws {
@@ -111,6 +167,23 @@ final class ComputerUseControllerTests: XCTestCase {
         XCTAssertEqual(client.decisions.count, 1)
         XCTAssertEqual(client.decisions.first?.1, .allowForChat)
         XCTAssertEqual(client.decisions.first?.0, request)
+    }
+
+    func testToolApprovalKeepsOwnerAndExpiryFence() throws {
+        let (controller, client) = try setupController()
+        let owner = try XCTUnwrap(controller.selectedThread?.id)
+        var params = try toolApprovalParameters()
+        params["threadId"] = "server-thread"
+        params["turnId"] = "turn-1"
+        let approval = try XCTUnwrap(ComputerUseApproval(method: "mcpServer/elicitation/request", params: params))
+        controller.receiveComputerUseApproval(token(), approval: approval)
+        controller.createThread()
+        XCTAssertNil(controller.pendingComputerUseApproval(for: try XCTUnwrap(controller.selectedThread?.id)))
+        let pending = try XCTUnwrap(controller.pendingComputerUseApproval(for: owner))
+        XCTAssertEqual(pending.approval.target, approval.target)
+        controller.resolveComputerUseApproval(pending.id, decision: .allowForChat, now: Date().addingTimeInterval(301))
+        XCTAssertEqual(client.decisions.map(\.1), [.cancel])
+        XCTAssertTrue(controller.computerUseApprovals.isEmpty)
     }
 
     func testUnknownThreadAndMismatchedTurnDecline() throws {

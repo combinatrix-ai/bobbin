@@ -4,12 +4,12 @@ import XCTest
 
 @MainActor
 final class CodexAppServerClientTests: XCTestCase {
-    private func client() throws -> CodexAppServerClient {
+    private func client(approval fixture: [String: Any]? = nil) throws -> CodexAppServerClient {
         let root = URL(fileURLWithPath: "/private/tmp/Bobbin-RPC-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let script = root.appendingPathComponent("server")
-        let fixture = try nativeApprovalParameters()
+        let fixture = try fixture ?? nativeApprovalParameters()
         let payload = String(decoding: try JSONSerialization.data(withJSONObject: fixture), as: UTF8.self)
         let source = """
         #!/usr/bin/python3
@@ -49,7 +49,7 @@ final class CodexAppServerClientTests: XCTestCase {
         let client = try client()
         defer { client.stop() }
         client.onComputerUseApproval = { token, approval in
-            XCTAssertEqual(approval.appIdentifier, "com.apple.calculator")
+            XCTAssertEqual(approval.target, .nativeApp(identifier: "com.apple.calculator", name: "Calculator"))
             client.respond(to: token, decision: .allowForChat)
         }
         try await client.start()
@@ -57,6 +57,25 @@ final class CodexAppServerClientTests: XCTestCase {
         XCTAssertEqual(response["action"] as? String, "accept")
         XCTAssertEqual(response["_meta"] as? [String: String], ["persist": "session"])
         XCTAssertNil(response["wrong"])
+    }
+
+    func testCapturedToolApprovalDispatchesAndReturnsSessionOnlyAllow() async throws {
+        let parameters = try toolApprovalParameters()
+        let code = ((parameters["_meta"] as! [String: Any])["tool_params"] as! [String: Any])["code"] as! String
+        let client = try client(approval: parameters)
+        defer { client.stop() }
+        var received = false
+        client.onComputerUseApproval = { token, approval in
+            received = true
+            XCTAssertEqual(approval.target, .toolExecution(code: code))
+            client.respond(to: token, decision: .allowForChat)
+        }
+        try await client.start()
+        let response = try await client.request(method: "approval")
+        XCTAssertTrue(received)
+        XCTAssertEqual(response["action"] as? String, "accept")
+        XCTAssertEqual(response["_meta"] as? [String: String], ["persist": "session"])
+        XCTAssertTrue((response["content"] as? [String: String])?.isEmpty == true)
     }
 
     func testStopSettlesOutstandingRequestAndRestartFencesLateApprovalResponse() async throws {
