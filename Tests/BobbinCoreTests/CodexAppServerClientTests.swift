@@ -4,8 +4,8 @@ import XCTest
 
 @MainActor
 final class CodexAppServerClientTests: XCTestCase {
-    private func client(approval fixture: [String: Any]? = nil) throws -> CodexAppServerClient {
-        let root = URL(fileURLWithPath: "/private/tmp/Bobbin-RPC-" + UUID().uuidString)
+    private func client(homeName: String = "Bobbin-RPC", approval fixture: [String: Any]? = nil) throws -> CodexAppServerClient {
+        let root = URL(fileURLWithPath: "/private/tmp/" + homeName + "-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
         let script = root.appendingPathComponent("server")
@@ -13,7 +13,7 @@ final class CodexAppServerClientTests: XCTestCase {
         let payload = String(decoding: try JSONSerialization.data(withJSONObject: fixture), as: UTF8.self)
         let source = """
         #!/usr/bin/python3
-        import sys, json
+        import sys, json, os
         approval = json.loads(\(String(reflecting: payload)))
         waiting = None
         def emit(value):
@@ -30,6 +30,8 @@ final class CodexAppServerClientTests: XCTestCase {
                 emit({'id': message['id'], 'method': 'mcpServer/elicitation/request', 'params': approval})
             elif method == 'hang':
                 emit({'method': 'hanging', 'params': {}})
+            elif method == 'launchInfo':
+                emit({'id': message['id'], 'result': {'argv': sys.argv[1:], 'home': os.environ['CODEX_HOME']}})
             elif method == 'ping':
                 emit({'id': message['id'], 'result': {'pong': True}})
             elif method is None and waiting:
@@ -43,6 +45,38 @@ final class CodexAppServerClientTests: XCTestCase {
         try Data(source.utf8).write(to: script)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: script.path)
         return try CodexAppServerClient(codexHome: root, executableURL: script)
+    }
+
+    func testEveryStartPinsMarketplaceToHomeWithSpecialCharacters() async throws {
+        let homeName = "Bobbin RPC \"quoted\" \\ 日本語"
+        let client = try client(homeName: homeName)
+        defer { client.stop() }
+        for _ in 0..<2 {
+            try await client.start()
+            let launch = try await client.request(method: "launchInfo")
+            let arguments = try XCTUnwrap(launch["argv"] as? [String])
+            let home = try XCTUnwrap(launch["home"] as? String)
+            XCTAssertTrue(home.contains(homeName))
+            let configs = arguments.indices.compactMap { index -> String? in
+                guard arguments[index] == "-c", index + 1 < arguments.count else { return nil }
+                return arguments[index + 1]
+            }
+            XCTAssertEqual(configs.count, 1, "Expected one marketplace source override in actual argv: \(arguments)")
+            let config = configs.first ?? ""
+            XCTAssertEqual(config.split(separator: "=", maxSplits: 1).first?.trimmingCharacters(in: .whitespaces), "marketplaces.openai-bundled")
+            let fields = try NSRegularExpression(pattern: #"(\w+)\s*=\s*("(?:[^"\\]|\\.)*")"#)
+            let source = config as NSString
+            var values: [String: String] = [:]
+            for match in fields.matches(in: config, range: NSRange(location: 0, length: source.length)) {
+                let encoded = Data(source.substring(with: match.range(at: 2)).utf8)
+                values[source.substring(with: match.range(at: 1))] = try JSONDecoder().decode(String.self, from: encoded)
+            }
+            XCTAssertEqual(values, [
+                "source_type": "local",
+                "source": URL(fileURLWithPath: home).appendingPathComponent(".tmp/bundled-marketplaces/openai-bundled").path
+            ])
+            client.stop()
+        }
     }
 
     func testMethodBearingIntegerCollisionAndStringResponseCannotStealContinuation() async throws {
