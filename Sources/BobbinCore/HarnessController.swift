@@ -661,7 +661,10 @@ public final class HarnessController: ObservableObject {
             "approvalPolicy": thread.reviewMode.approvalPolicy,
             "approvalsReviewer": thread.reviewMode.approvalsReviewer,
             "model": thread.model,
-            "effort": thread.reasoningEffort
+            "effort": thread.reasoningEffort,
+            "additionalContext": [
+                "bobbin_computer_use": ["kind": "application", "value": computerUseInstructions]
+            ]
         ]
         if let clientUserMessageID {
             parameters["clientUserMessageId"] = clientUserMessageID.uuidString

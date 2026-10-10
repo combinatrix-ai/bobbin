@@ -442,7 +442,7 @@ final class ThreadStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testComputerUseAndCustomInstructionsReachStartAndResume() throws {
+    func testComputerUseInstructionsReachStartResumeAndApplicationContext() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
         var thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
@@ -467,6 +467,13 @@ final class ThreadStoreTests: XCTestCase {
             thread: thread
         )
         XCTAssertNil(turn["developerInstructions"])
+        XCTAssertNil(turn["collaborationMode"])
+        let contexts = try XCTUnwrap(turn["additionalContext"] as? [String: [String: String]])
+        let context = try XCTUnwrap(contexts["bobbin_computer_use"])
+        XCTAssertEqual(context["kind"], "application")
+        XCTAssertTrue(context["value"]?.contains("mcp__cua_repl") == true)
+        XCTAssertFalse(context["value"]?.contains(thread.systemPrompt) == true)
+        XCTAssertEqual(instructions, (context["value"] ?? "") + "\n\n" + thread.systemPrompt)
     }
 
     @MainActor
@@ -491,6 +498,10 @@ final class ThreadStoreTests: XCTestCase {
                 thread: thread
             )
             XCTAssertEqual(resume["developerInstructions"] as? String, instructions)
+            let turn = HarnessController.turnStartParameters(threadID: "codex-thread", text: "hello", thread: thread)
+            let contexts = try XCTUnwrap(turn["additionalContext"] as? [String: [String: String]])
+            XCTAssertEqual(contexts["bobbin_computer_use"]?["kind"], "application")
+            XCTAssertEqual(contexts["bobbin_computer_use"]?["value"], instructions)
             XCTAssertEqual(thread.systemPrompt, prompt)
         }
     }

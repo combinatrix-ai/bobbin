@@ -104,15 +104,21 @@ final class HarnessControllerTests: XCTestCase {
         XCTAssertTrue(instructions.contains("mcp__cua_repl"))
         XCTAssertTrue(instructions.hasSuffix(created.systemPrompt))
         XCTAssertEqual(controller.store.state.defaultSystemPrompt, created.systemPrompt)
+        let turn = try XCTUnwrap(client.requests.first(where: { $0.method == "turn/start" }))
+        let contexts = try XCTUnwrap(turn.params?["additionalContext"] as? [String: [String: String]])
+        let context = try XCTUnwrap(contexts["bobbin_computer_use"])
+        XCTAssertEqual(context["kind"], "application")
+        XCTAssertTrue(context["value"]?.contains("mcp__cua_repl") == true)
+        XCTAssertFalse(context["value"]?.contains(created.systemPrompt) == true)
     }
 
-    func testSendToExistingThreadRefreshesComputerUseInstructions() async throws {
+    func testSendToExistingThreadRefreshesComputerUseAndPreservesLongCustomPrompt() async throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
         let client = RecordingAppServerClient()
         let controller = try HarnessController(testPaths: fixture.paths, appServerClient: client)
         let threadID = try XCTUnwrap(controller.store.state.selectedThreadID)
-        let prompt = "Keep my existing instructions verbatim.\n"
+        let prompt = String(repeating: "Keep my existing instructions verbatim.\n", count: 200)
         try controller.store.update(threadID) { thread in
             thread.codexThreadID = "existing-thread"
             thread.status = .done
@@ -129,6 +135,12 @@ final class HarnessControllerTests: XCTestCase {
         let instructions = try XCTUnwrap(resume.params?["developerInstructions"] as? String)
         XCTAssertTrue(instructions.contains("mcp__cua_repl"))
         XCTAssertTrue(instructions.hasSuffix(prompt))
+        let turn = try XCTUnwrap(client.requests.first(where: { $0.method == "turn/start" }))
+        let contexts = try XCTUnwrap(turn.params?["additionalContext"] as? [String: [String: String]])
+        let context = try XCTUnwrap(contexts["bobbin_computer_use"])
+        XCTAssertEqual(context["kind"], "application")
+        XCTAssertTrue(context["value"]?.contains("mcp__cua_repl") == true)
+        XCTAssertFalse(context["value"]?.contains("Keep my existing instructions verbatim.") == true)
         XCTAssertEqual(controller.store.state.threads.first(where: { $0.id == threadID })?.systemPrompt, prompt)
         let reloaded = try ThreadStore(paths: fixture.paths)
         XCTAssertEqual(reloaded.state.threads.first(where: { $0.id == threadID })?.systemPrompt, prompt)
@@ -489,6 +501,10 @@ final class HarnessControllerTests: XCTestCase {
         XCTAssertEqual(input.first?["text"] as? String, "replacement")
         XCTAssertNotNil(turn.params?["clientUserMessageId"] as? String)
         XCTAssertEqual(turn.params?["approvalPolicy"] as? String, "never")
+        let contexts = try XCTUnwrap(turn.params?["additionalContext"] as? [String: [String: String]])
+        XCTAssertEqual(contexts["bobbin_computer_use"]?["kind"], "application")
+        XCTAssertTrue(contexts["bobbin_computer_use"]?["value"]?.contains("mcp__cua_repl") == true)
+        XCTAssertFalse(contexts["bobbin_computer_use"]?["value"]?.contains("Keep the instructions when editing a message.") == true)
 
         let rewritten = try XCTUnwrap(controller.store.state.threads.first(where: { $0.id == threadID }))
         XCTAssertEqual(rewritten.codexThreadID, "forked-thread")
