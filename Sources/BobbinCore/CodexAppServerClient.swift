@@ -53,7 +53,7 @@ public final class CodexAppServerClient: @unchecked Sendable {
         let errorPipe = Pipe()
 
         process.executableURL = executableURL
-        process.arguments = ["app-server", "--stdio"]
+        process.arguments = processArguments()
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = errorPipe
@@ -113,6 +113,22 @@ public final class CodexAppServerClient: @unchecked Sendable {
             ]
         )
         try sendNotification(method: "initialized", params: [:])
+    }
+
+    private func processArguments() -> [String] {
+        let source = ComputerUseService.marketplaceURL(home: codexHome).path.unicodeScalars.map { scalar -> String in
+            switch scalar.value {
+            case 0x22: return "\\\""
+            case 0x5C: return "\\\\"
+            case 0...0x1F, 0x7F: return String(format: "\\u%04X", scalar.value)
+            default: return String(scalar)
+            }
+        }.joined()
+        // Project configuration can otherwise redirect this marketplace outside Bobbin's home.
+        return [
+            "-c", "marketplaces.openai-bundled={source_type=\"local\",source=\"\(source)\"}",
+            "app-server", "--stdio"
+        ]
     }
 
     public func stop() {

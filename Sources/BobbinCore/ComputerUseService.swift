@@ -124,6 +124,10 @@ struct ComputerUseService: Sendable {
     static let clientPath = "Contents/SharedSupport/SkyComputerUseClient.app"
     static let ownerFile = ".bobbin-owner.json"
 
+    static func marketplaceURL(home: URL) -> URL {
+        home.appendingPathComponent(".tmp/bundled-marketplaces/openai-bundled")
+    }
+
     init(inspector: any ComputerUseSignatureInspecting = SystemSignatureInspector()) { self.inspector = inspector }
 
     func discover(applications: [URL] = [URL(fileURLWithPath: "/Applications/ChatGPT.app"), URL(fileURLWithPath: "/Applications/Codex.app")]) throws -> DesktopComputerUseSource? {
@@ -167,9 +171,11 @@ struct ComputerUseService: Sendable {
                 }
             }, current: source.assertCurrent)
             publications.append(publication)
-            _ = try OwnedComputerUseDirectory(home.appendingPathComponent(".tmp"), create: true)
-            let parent = try OwnedComputerUseDirectory(home.appendingPathComponent(".tmp/bundled-marketplaces"), create: true)
-            let marketplacePublication = try publish(parent: parent, name: "openai-bundled", fingerprint: source.fingerprint, build: { stage in
+            let marketplace = Self.marketplaceURL(home: home)
+            let marketplaceParent = marketplace.deletingLastPathComponent()
+            _ = try OwnedComputerUseDirectory(marketplaceParent.deletingLastPathComponent(), create: true)
+            let parent = try OwnedComputerUseDirectory(marketplaceParent, create: true)
+            let marketplacePublication = try publish(parent: parent, name: marketplace.lastPathComponent, fingerprint: source.fingerprint, build: { stage in
                 try makeMarketplace(source: source, home: home, stage: stage)
             }, validate: { directory in
                 try Self.assertNoSymlinks(directory)
@@ -179,7 +185,7 @@ struct ComputerUseService: Sendable {
             try root.assertRegularFileOrAbsent("config.toml")
             try source.assertCurrent()
             return ComputerUseInstallation(
-                marketplace: parent.url.appendingPathComponent("openai-bundled"),
+                marketplace: marketplace,
                 publications: publications,
                 preparation: preparation
             )
