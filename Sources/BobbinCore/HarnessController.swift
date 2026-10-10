@@ -598,6 +598,7 @@ public final class HarnessController: ObservableObject {
     - When the user asks to launch or operate a Mac app's UI, use that native Computer Use tool.
     - Complete the requested operation. If the UI shows a wrong or intermediate result, correct the input or action and check again while access remains available. Do not end the task by only reporting a recoverable mistake.
     - Match each control's current label or description to the intended action or value. Do not guess accessibility element numbers.
+    - For text, numbers, or expressions, prefer documented text-entry or keyboard APIs when the app supports them. Enter the requested input verbatim, submit it, and verify the result in the UI.
     - Call it directly. It is not inside functions.exec and is not in ALL_TOOLS. Do not send CUA code to functions.exec or a shell.
     - Follow the tool's first-call rule: one entry API call, then read its returned documentation and UI state. For a specified Mac app, use cua.getApp. Use only documented APIs.
     - Do not use osascript, AppleScript, JXA, System Events, or shell-driven UI automation for that app operation.
