@@ -466,6 +466,22 @@ final class ThreadStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testComputerUseGuidanceReachesEveryTurnAsApplicationContext() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        var thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+        thread.systemPrompt = "Keep replies concise."
+
+        let turn = HarnessController.turnStartParameters(threadID: "codex-thread", text: "hello", thread: thread)
+        let contexts = try XCTUnwrap(turn["additionalContext"] as? [String: [String: String]])
+        let context = try XCTUnwrap(contexts["bobbin_computer_use"])
+        XCTAssertEqual(context["kind"], "application")
+        XCTAssertTrue(context["value"]?.contains("mcp__cua_repl.js") == true)
+        XCTAssertFalse(context["value"]?.contains(thread.systemPrompt) == true)
+        XCTAssertLessThan(context["value"]?.utf8.count ?? .max, 4_000)
+    }
+
+    @MainActor
     func testWhitespaceOnlySystemPromptIsOmittedFromStartAndResumeParameters() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }

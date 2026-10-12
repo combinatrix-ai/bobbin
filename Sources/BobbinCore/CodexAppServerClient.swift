@@ -6,6 +6,7 @@ public final class CodexAppServerClient: @unchecked Sendable {
     public typealias TerminationHandler = (Error) -> Void
 
     private let stateQueue = DispatchQueue(label: "com.tinyharness.app-server")
+    private let stateQueueKey = DispatchSpecificKey<Bool>()
     private let codexHome: URL
     private let executableURL: URL
 
@@ -16,7 +17,11 @@ public final class CodexAppServerClient: @unchecked Sendable {
     private var outputBuffer = Data()
     private var recentErrorOutput = ""
     private var nextID = 1
-    private var pending: [Int: CheckedContinuation<JSONObject, Error>] = [:]
+    private var pending: [RPCID: CheckedContinuation<JSONObject, Error>] = [:]
+    private var generation = UUID()
+    private var inbound: [RPCID: ServerRequestToken] = [:]
+    public typealias ApprovalHandler = (ServerRequestToken, ComputerUseApproval) -> Void
+    public var onComputerUseApproval: ApprovalHandler?
 
     public var onNotification: NotificationHandler?
     public var onTermination: TerminationHandler?
@@ -27,6 +32,7 @@ public final class CodexAppServerClient: @unchecked Sendable {
             throw HarnessError.codexNotFound
         }
         self.executableURL = executableURL
+        stateQueue.setSpecific(key: stateQueueKey, value: true)
     }
 
     deinit {
@@ -40,13 +46,14 @@ public final class CodexAppServerClient: @unchecked Sendable {
     public func start() async throws {
         if isRunning { return }
 
+        let epoch = UUID()
         let process = Process()
         let inputPipe = Pipe()
         let outputPipe = Pipe()
         let errorPipe = Pipe()
 
         process.executableURL = executableURL
-        process.arguments = ["app-server", "--stdio"]
+        process.arguments = processArguments()
         process.standardInput = inputPipe
         process.standardOutput = outputPipe
         process.standardError = errorPipe
@@ -59,37 +66,45 @@ public final class CodexAppServerClient: @unchecked Sendable {
         outputPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty else { return }
-            self?.stateQueue.async { self?.consumeOutput(data) }
+            self?.stateQueue.async {
+                guard let self, self.generation == epoch else { return }
+                self.consumeOutput(data)
+            }
         }
         errorPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else { return }
-            self?.stateQueue.async { self?.appendErrorOutput(text) }
+            self?.stateQueue.async {
+                guard let self, self.generation == epoch else { return }
+                self.appendErrorOutput(text)
+            }
         }
         process.terminationHandler = { [weak self] process in
-            self?.stateQueue.async { self?.handleTermination(status: process.terminationStatus) }
+            self?.stateQueue.async {
+                guard let self, self.generation == epoch else { return }
+                self.handleTermination(status: process.terminationStatus, epoch: epoch)
+            }
         }
 
-        do {
-            try process.run()
-        } catch {
-            outputPipe.fileHandleForReading.readabilityHandler = nil
-            errorPipe.fileHandleForReading.readabilityHandler = nil
-            throw error
-        }
-
-        stateQueue.sync {
+        try stateQueue.sync {
+            guard self.process == nil else { throw HarnessError.malformedResponse("app-server already started") }
+            self.generation = epoch
             self.process = process
             self.inputPipe = inputPipe
             self.outputPipe = outputPipe
             self.errorPipe = errorPipe
             self.outputBuffer.removeAll(keepingCapacity: true)
             self.recentErrorOutput = ""
+            do { try process.run() } catch {
+                settleAndClear(error)
+                throw error
+            }
         }
 
         _ = try await request(
             method: "initialize",
             params: [
+                "capabilities": ["experimentalApi": true, "mcpServerOpenaiFormElicitation": true],
                 "clientInfo": [
                     "name": "bobbin",
                     "title": "Bobbin",
@@ -100,21 +115,63 @@ public final class CodexAppServerClient: @unchecked Sendable {
         try sendNotification(method: "initialized", params: [:])
     }
 
+    private func processArguments() -> [String] {
+        let source = ComputerUseService.marketplaceURL(home: codexHome).path.unicodeScalars.map { scalar -> String in
+            switch scalar.value {
+            case 0x22: return "\\\""
+            case 0x5C: return "\\\\"
+            case 0...0x1F, 0x7F: return String(format: "\\u%04X", scalar.value)
+            default: return String(scalar)
+            }
+        }.joined()
+        // Project configuration can otherwise redirect this marketplace outside Bobbin's home.
+        return [
+            "-c", "marketplaces.openai-bundled={source_type=\"local\",source=\"\(source)\"}",
+            "app-server", "--stdio"
+        ]
+    }
+
     public func stop() {
-        stateQueue.sync {
-            outputPipe?.fileHandleForReading.readabilityHandler = nil
-            errorPipe?.fileHandleForReading.readabilityHandler = nil
-            if process?.isRunning == true { process?.terminate() }
-            process = nil
-            inputPipe = nil
-            outputPipe = nil
-            errorPipe = nil
+        if DispatchQueue.getSpecific(key: stateQueueKey) == true {
+            stopOnQueue()
+        } else {
+            stateQueue.sync { stopOnQueue() }
+        }
+    }
+
+    private func stopOnQueue() {
+        generation = UUID()
+        if process?.isRunning == true { process?.terminate() }
+        settleAndClear(HarnessError.appServerStopped("Stopped"))
+    }
+
+    private func settleAndClear(_ error: Error) {
+        outputPipe?.fileHandleForReading.readabilityHandler = nil
+        errorPipe?.fileHandleForReading.readabilityHandler = nil
+        process?.terminationHandler = nil
+        process = nil
+        inputPipe = nil
+        outputPipe = nil
+        errorPipe = nil
+        outputBuffer.removeAll()
+        inbound.removeAll()
+        let continuations = Array(pending.values)
+        pending.removeAll()
+        for continuation in continuations { continuation.resume(throwing: error) }
+    }
+
+    public func respond(to token: ServerRequestToken, decision: ComputerUseDecision) {
+        stateQueue.async {
+            guard token.generation == self.generation,
+                  self.inbound[token.id] == token else { return }
+            self.inbound.removeValue(forKey: token.id)
+            self.writeResponse(id: token.id, result: decision.result)
         }
     }
 
     public func request(method: String, params: JSONObject? = nil) async throws -> JSONObject {
         try await withCheckedThrowingContinuation { continuation in
-            stateQueue.async {
+            stateQueue.async { [self] in
                 guard self.process?.isRunning == true, let input = self.inputPipe?.fileHandleForWriting else {
                     continuation.resume(throwing: HarnessError.appServerStopped(self.recentErrorOutput))
                     return
@@ -127,10 +184,15 @@ public final class CodexAppServerClient: @unchecked Sendable {
 
                 do {
                     let data = try Self.encodedLine(message)
-                    self.pending[id] = continuation
+                    self.pending[.integer(Int64(id))] = continuation
                     try input.write(contentsOf: data)
+                    self.stateQueue.asyncAfter(deadline: .now() + 360) { [weak self] in
+                        self?.pending.removeValue(forKey: .integer(Int64(id)))?.resume(
+                            throwing: HarnessError.malformedResponse("Timed out waiting for " + method)
+                        )
+                    }
                 } catch {
-                    self.pending.removeValue(forKey: id)
+                    self.pending.removeValue(forKey: .integer(Int64(id)))
                     continuation.resume(throwing: error)
                 }
             }
@@ -166,38 +228,52 @@ public final class CodexAppServerClient: @unchecked Sendable {
             return
         }
 
-        if let id = Self.integerID(message["id"]), let continuation = pending.removeValue(forKey: id) {
-            if let error = message["error"] as? JSONObject {
-                let code = Self.integerID(error["code"]) ?? -1
-                let detail = error["message"] as? String ?? "Unknown app-server error"
-                continuation.resume(throwing: HarnessError.serverError(code: code, message: detail))
-            } else if let result = message["result"] as? JSONObject {
-                continuation.resume(returning: result)
-            } else {
-                continuation.resume(throwing: HarnessError.malformedResponse("missing result"))
+        if let method = message["method"] as? String {
+            if message["id"] != nil {
+                guard let id = RPCID(message["id"]) else { return }
+                guard inbound[id] == nil else { return }
+                let params = message["params"] as? JSONObject ?? [:]
+                if let approval = ComputerUseApproval(method: method, params: params), let handler = onComputerUseApproval {
+                    let token = ServerRequestToken(generation: generation, id: id, nonce: UUID())
+                    inbound[id] = token
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self, self.stateQueue.sync(execute: { self.inbound[id] == token }) else { return }
+                        handler(token, approval)
+                    }
+                } else if method == "mcpServer/elicitation/request" {
+                    writeResponse(id: id, result: ComputerUseDecision.decline.result)
+                } else {
+                    writeResponse(id: id, error: ["code": -32601, "message": "Bobbin does not support this server request"])
+                }
+                return
+            }
+            if method == "serverRequest/resolved", let params = message["params"] as? JSONObject,
+               let id = RPCID(params["requestId"]) { inbound.removeValue(forKey: id) }
+            let epoch = generation
+            let handler = onNotification
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.stateQueue.sync(execute: { self.generation == epoch }) else { return }
+                handler?(message)
             }
             return
         }
-
-        if message["id"] != nil, message["method"] != nil {
-            respondUnsupported(to: message)
-            return
+        guard let id = RPCID(message["id"]), let continuation = pending.removeValue(forKey: id) else { return }
+        if let error = message["error"] as? JSONObject {
+            let code = (error["code"] as? NSNumber)?.intValue ?? -1
+            continuation.resume(throwing: HarnessError.serverError(code: code, message: error["message"] as? String ?? "Unknown app-server error"))
+        } else if let result = message["result"] as? JSONObject {
+            continuation.resume(returning: result)
+        } else {
+            continuation.resume(throwing: HarnessError.malformedResponse("missing result"))
         }
-
-        guard message["method"] != nil else { return }
-        let handler = onNotification
-        DispatchQueue.main.async { handler?(message) }
     }
 
-    private func respondUnsupported(to message: JSONObject) {
-        guard let input = inputPipe?.fileHandleForWriting, let id = message["id"] else { return }
-        let response: JSONObject = [
-            "id": id,
-            "error": ["code": -32601, "message": "Bobbin does not support this server request"]
-        ]
-        if let data = try? Self.encodedLine(response) {
-            try? input.write(contentsOf: data)
-        }
+    private func writeResponse(id: RPCID, result: JSONObject? = nil, error: JSONObject? = nil) {
+        guard let input = inputPipe?.fileHandleForWriting else { return }
+        var response: JSONObject = ["id": id.json]
+        if let result { response["result"] = result }
+        if let error { response["error"] = error }
+        if let data = try? Self.encodedLine(response) { try? input.write(contentsOf: data) }
     }
 
     private func appendErrorOutput(_ text: String) {
@@ -207,20 +283,15 @@ public final class CodexAppServerClient: @unchecked Sendable {
         }
     }
 
-    private func handleTermination(status: Int32) {
-        outputPipe?.fileHandleForReading.readabilityHandler = nil
-        errorPipe?.fileHandleForReading.readabilityHandler = nil
+    private func handleTermination(status: Int32, epoch: UUID) {
         let detail = recentErrorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         let error = HarnessError.appServerStopped(detail.isEmpty ? "exit status \(status)" : detail)
-        let continuations = pending.values
-        pending.removeAll()
-        process = nil
-        inputPipe = nil
-        outputPipe = nil
-        errorPipe = nil
-        for continuation in continuations { continuation.resume(throwing: error) }
+        settleAndClear(error)
         let handler = onTermination
-        DispatchQueue.main.async { handler?(error) }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.stateQueue.sync(execute: { self.generation == epoch }) else { return }
+            handler?(error)
+        }
     }
 
     private static func encodedLine(_ object: JSONObject) throws -> Data {
@@ -230,12 +301,6 @@ public final class CodexAppServerClient: @unchecked Sendable {
         var data = try JSONSerialization.data(withJSONObject: object)
         data.append(0x0A)
         return data
-    }
-
-    private static func integerID(_ value: Any?) -> Int? {
-        if let value = value as? Int { return value }
-        if let value = value as? NSNumber { return value.intValue }
-        return nil
     }
 
     public static func findCodexExecutable() -> URL? {

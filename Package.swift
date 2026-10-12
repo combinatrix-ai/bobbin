@@ -31,7 +31,8 @@ let package = Package(
         ),
         .testTarget(
             name: "BobbinCoreTests",
-            dependencies: ["BobbinCore", "BobbinIcon"]
+            dependencies: ["BobbinCore", "BobbinIcon"],
+            resources: [.copy("Fixtures")]
         )
     ]
 )

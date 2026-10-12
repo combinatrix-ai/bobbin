@@ -84,7 +84,7 @@ final class DemoFixtureTests: XCTestCase {
         let demoPaths = try HarnessPaths.demo()
         XCTAssertTrue(demoPaths.isDemoRoot)
         XCTAssertTrue(
-            demoPaths.root.standardizedFileURL.path.hasPrefix(
+            demoPaths.root.deletingLastPathComponent().standardizedFileURL.path.hasPrefix(
                 FileManager.default.temporaryDirectory.standardizedFileURL.path
             )
         )

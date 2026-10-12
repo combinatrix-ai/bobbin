@@ -5,6 +5,7 @@ import Foundation
 /// Parsing lives in its own type so the demo switch can be proven correct in a
 /// test rather than inferred from wherever it happens to be read.
 public struct RuntimeOptions: Equatable, Sendable {
+    public var demoComputerUse = false
     /// Runs the app against deterministic in-process fixtures in an isolated
     /// temporary state root.
     ///
@@ -97,10 +98,12 @@ public struct RuntimeOptions: Equatable, Sendable {
             dataError = nil
         }
 
-        return RuntimeOptions(
-            demoMode: hasFlag || hasEnvironment,
+        var options = RuntimeOptions(
+            demoMode: hasFlag || hasEnvironment || flags.contains("--demo-computer-use"),
             demoDataPath: dataPath,
             demoDataError: dataError
         )
+        options.demoComputerUse = flags.contains("--demo-computer-use")
+        return options
     }
 }

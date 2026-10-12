@@ -4,6 +4,8 @@ import Combine
 protocol HarnessAppServerClient: AnyObject {
     var onNotification: CodexAppServerClient.NotificationHandler? { get set }
     var onTermination: CodexAppServerClient.TerminationHandler? { get set }
+    var onComputerUseApproval: CodexAppServerClient.ApprovalHandler? { get set }
+    func respond(to token: ServerRequestToken, decision: ComputerUseDecision)
 
     func start() async throws
     func stop()
@@ -77,6 +79,11 @@ public final class HarnessController: ObservableObject {
             return false
         }
     }
+
+    @Published public private(set) var computerUseState: ComputerUseState = .unavailable("Not started yet.")
+    @Published public private(set) var computerUseApprovals: [PendingComputerUseApproval] = []
+    private var clientGeneration = UUID()
+    private var approvalExpiryTasks: [UUID: Task<Void, Never>] = [:]
 
     @Published public private(set) var serverState: ServerState = .starting
     @Published public private(set) var authState: AuthState = .checking
@@ -169,6 +176,7 @@ public final class HarnessController: ObservableObject {
         self.authState = .authenticated(.deviceAuth)
         self.modelVerified = true
         self.availableModels = DemoFixture.modelCatalogue
+        bindCallbacks(appServerClient, generation: clientGeneration)
 
         if store.state.threads.isEmpty {
             _ = try store.createThread(workingDirectory: Self.resolvedWorkingDirectory(nil))
@@ -245,6 +253,9 @@ public final class HarnessController: ObservableObject {
 
     public func restart() {
         guard !isDemoMode else { return }
+        bootTask?.cancel()
+        clearComputerUseApprovals()
+        clientGeneration = UUID()
         client?.stop()
         client = nil
         serverState = .restarting
@@ -444,6 +455,7 @@ public final class HarnessController: ObservableObject {
     }
 
     public func deleteThread(_ id: UUID) {
+        clearComputerUseApprovals(threadID: id)
         guard let thread = store.state.threads.first(where: { $0.id == id }) else { return }
         if displayedConversationID == id {
             displayedConversationID = nil
@@ -551,6 +563,7 @@ public final class HarnessController: ObservableObject {
     }
 
     public func stopThread(_ localThreadID: UUID) {
+        clearComputerUseApprovals(threadID: localThreadID)
         guard let thread = store.state.threads.first(where: { $0.id == localThreadID }) else { return }
         _ = makeInterruptTask(thread)
     }
@@ -578,6 +591,13 @@ public final class HarnessController: ObservableObject {
     public func opacity(for thread: HarnessThread, now: Date = Date()) -> Double {
         store.opacity(for: thread, now: now)
     }
+
+    private static let computerUseInstructions = """
+    When operating a Mac app UI with mcp__cua_repl.js:
+    - Match controls by their current label or description. Do not guess element numbers.
+    - For text, numbers, or expressions, prefer documented text-entry or keyboard APIs.
+    - After the final action, read the app's UI and verify the outcome. If it is wrong, correct it and check again before reporting.
+    """
 
     static func threadStartParameters(for thread: HarnessThread) -> [String: Any] {
         var parameters: [String: Any] = [
@@ -631,7 +651,10 @@ public final class HarnessController: ObservableObject {
             "approvalPolicy": thread.reviewMode.approvalPolicy,
             "approvalsReviewer": thread.reviewMode.approvalsReviewer,
             "model": thread.model,
-            "effort": thread.reasoningEffort
+            "effort": thread.reasoningEffort,
+            "additionalContext": [
+                "bobbin_computer_use": ["kind": "application", "value": computerUseInstructions]
+            ]
         ]
         if let clientUserMessageID {
             parameters["clientUserMessageId"] = clientUserMessageID.uuidString
@@ -1081,27 +1104,130 @@ public final class HarnessController: ObservableObject {
     }
 
     private func bootSequence() async {
+        let generation = clientGeneration
         do {
-            let client = try CodexAppServerClient(codexHome: store.paths.codexHome)
-            client.onNotification = { [weak self] message in self?.handleNotification(message) }
-            client.onTermination = { [weak self] error in
-                guard let self else { return }
-                self.serverState = .stopped(error.localizedDescription)
-                self.lastError = error.localizedDescription
+            var runtime = await ComputerUseRuntime.discover()
+            try Task.checkCancellation()
+            guard generation == clientGeneration else { return }
+            if let source = runtime.source {
+                do { try source.assertCurrent() } catch {
+                    runtime = ComputerUseRuntime(source: nil, initialState: .failed(error.localizedDescription), service: runtime.service)
+                }
             }
+            let home = try OwnedComputerUseDirectory(store.paths.codexHome)
+            try home.assertRegularFileOrAbsent("config.toml")
+            let client = try CodexAppServerClient(codexHome: store.paths.codexHome, executableURL: runtime.source?.executable)
+            bindCallbacks(client, generation: generation)
             self.client = client
             try await client.start()
+            try Task.checkCancellation()
+            guard generation == clientGeneration else { return }
             serverState = .ready
-
+            let computerUseState = await runtime.prepare(using: client, home: store.paths.codexHome)
+            try Task.checkCancellation()
+            guard generation == clientGeneration else { return }
+            self.computerUseState = computerUseState
             try await loadModelCatalog(using: client)
             retryPendingDeletions(using: client)
             await cleanupExpiredThreads(using: client)
             await reconcileUnlinkedCodexThreads(using: client)
             try await resolveAuthentication(using: client)
         } catch {
+            guard generation == clientGeneration, !Task.isCancelled else { return }
             serverState = .stopped(error.localizedDescription)
             authState = .failed(error.localizedDescription)
             report(error)
+        }
+    }
+
+    private func bindCallbacks(_ client: any HarnessAppServerClient, generation: UUID) {
+        client.onNotification = { [weak self] message in
+            guard let self, self.clientGeneration == generation else { return }
+            self.handleNotification(message)
+        }
+        client.onComputerUseApproval = { [weak self, weak client] token, approval in
+            guard let self, self.clientGeneration == generation else {
+                client?.respond(to: token, decision: .cancel)
+                return
+            }
+            self.receiveComputerUseApproval(token, approval: approval)
+        }
+        client.onTermination = { [weak self] error in
+            guard let self, self.clientGeneration == generation else { return }
+            self.clearComputerUseApprovals()
+            self.serverState = .stopped(error.localizedDescription)
+            self.lastError = error.localizedDescription
+        }
+    }
+
+    public func pendingComputerUseApproval(for threadID: UUID) -> PendingComputerUseApproval? {
+        computerUseApprovals.first { $0.localThreadID == threadID }
+    }
+
+    func receiveComputerUseApproval(_ token: ServerRequestToken, approval: ComputerUseApproval, now: Date = Date()) {
+        let owners = store.state.threads.filter { $0.codexThreadID == approval.threadID && $0.status == .running }
+        guard owners.count == 1, let owner = owners.first, let turnID = owner.activeTurnID,
+              approval.turnID == nil || approval.turnID == turnID else {
+            client?.respond(to: token, decision: .decline)
+            return
+        }
+        guard !computerUseApprovals.contains(where: { $0.token == token }) else { return }
+        let pending = PendingComputerUseApproval(
+            id: UUID(),
+            localThreadID: owner.id,
+            approval: approval,
+            token: token,
+            activeTurnID: turnID,
+            expiresAt: now.addingTimeInterval(300)
+        )
+        computerUseApprovals.append(pending)
+        approvalExpiryTasks[pending.id] = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(300)) } catch { return }
+            self?.resolveComputerUseApproval(pending.id, decision: .cancel)
+        }
+    }
+
+    public func resolveComputerUseApproval(_ id: UUID, decision: ComputerUseDecision, now: Date = Date()) {
+        guard let pending = computerUseApprovals.first(where: { $0.id == id }) else { return }
+        let owner = store.state.threads.first { $0.id == pending.localThreadID }
+        let current = owner?.codexThreadID == pending.approval.threadID
+            && owner?.status == .running && owner?.activeTurnID == pending.activeTurnID
+            && pending.expiresAt > now
+        removeComputerUseApproval(id)
+        client?.respond(to: pending.token, decision: current ? decision : .cancel)
+    }
+
+    private func removeComputerUseApproval(_ id: UUID) {
+        computerUseApprovals.removeAll { $0.id == id }
+        approvalExpiryTasks.removeValue(forKey: id)?.cancel()
+    }
+
+    private func clearComputerUseApprovals(threadID: UUID? = nil) {
+        for pending in computerUseApprovals where threadID == nil || pending.localThreadID == threadID {
+            client?.respond(to: pending.token, decision: .cancel)
+            removeComputerUseApproval(pending.id)
+        }
+    }
+
+    public func showDemoComputerUseApproval() {
+        guard isDemoMode, let thread = selectedThread else { return }
+        let serverID = "demo-computer-use"
+        try? store.update(thread.id) {
+            $0.codexThreadID = serverID
+            $0.activeTurnID = "demo-turn"
+            $0.status = .running
+        }
+        let params: [String: Any] = [
+            "threadId": serverID, "turnId": NSNull(), "serverName": "cua_repl", "mode": "form",
+            "message": "Allow Computer Use to use \"Calculator\"?",
+            "requestedSchema": ["type": "object", "properties": [String: Any]()],
+            "_meta": ["connector_id": "computer-use", "codex_approval_kind": "mcp_tool_call",
+                      "tool_params": ["app": "com.apple.calculator"],
+                      "tool_params_display": [["name": "app", "value": "Calculator"]]]
+        ]
+        if let approval = ComputerUseApproval(method: "mcpServer/elicitation/request", params: params) {
+            receiveComputerUseApproval(ServerRequestToken(generation: UUID(), id: .integer(0), nonce: UUID()), approval: approval)
+            computerUseState = .ready
         }
     }
 
@@ -1113,6 +1239,7 @@ public final class HarnessController: ObservableObject {
         guard let models = response["data"] as? [[String: Any]] else {
             throw HarnessError.malformedResponse("model/list.data")
         }
+        try Task.checkCancellation()
         let catalog = Self.modelOptions(from: models)
         guard !catalog.isEmpty else { throw HarnessError.malformedResponse("model/list.data") }
         availableModels = catalog
@@ -1730,6 +1857,12 @@ public final class HarnessController: ObservableObject {
         let params = message["params"] as? [String: Any] ?? [:]
 
         switch method {
+        case "serverRequest/resolved":
+            if let requestID = RPCID(params["requestId"]) {
+                for pending in computerUseApprovals where pending.token.id == requestID && pending.approval.threadID == params["threadId"] as? String {
+                    removeComputerUseApproval(pending.id)
+                }
+            }
         case "account/login/completed":
             let success = params["success"] as? Bool ?? false
             if success, let mode = pendingAuthMode {
@@ -1991,6 +2124,8 @@ public final class HarnessController: ObservableObject {
             let localThread = store.state.threads.first(where: { $0.codexThreadID == codexThreadID })
         else { return }
 
+        if let completedID = turn["id"] as? String, let activeID = localThread.activeTurnID, completedID != activeID { return }
+        clearComputerUseApprovals(threadID: localThread.id)
         let status = turn["status"] as? String ?? "failed"
         do {
             let nextStatus: HarnessThreadStatus
