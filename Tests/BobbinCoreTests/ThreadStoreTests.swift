@@ -442,24 +442,20 @@ final class ThreadStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testComputerUseInstructionsReachStartResumeAndApplicationContext() throws {
+    func testSystemPromptIsForwardedToThreadStartOnly() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
         var thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
         thread.systemPrompt = "Keep replies concise."
 
         let start = HarnessController.threadStartParameters(for: thread)
-        let instructions = try XCTUnwrap(start["developerInstructions"] as? String)
-        XCTAssertTrue(instructions.contains("Computer Use"))
-        XCTAssertTrue(instructions.contains("mcp__cua_repl"))
-        XCTAssertTrue(instructions.hasSuffix(thread.systemPrompt))
+        XCTAssertEqual(start["developerInstructions"] as? String, thread.systemPrompt)
 
         let resume = HarnessController.threadResumeParameters(
             threadID: "codex-thread",
             thread: thread
         )
-        XCTAssertEqual(resume["developerInstructions"] as? String, instructions)
-        XCTAssertEqual(thread.systemPrompt, "Keep replies concise.")
+        XCTAssertNil(resume["developerInstructions"])
 
         let turn = HarnessController.turnStartParameters(
             threadID: "codex-thread",
@@ -467,42 +463,40 @@ final class ThreadStoreTests: XCTestCase {
             thread: thread
         )
         XCTAssertNil(turn["developerInstructions"])
-        XCTAssertNil(turn["collaborationMode"])
-        let contexts = try XCTUnwrap(turn["additionalContext"] as? [String: [String: String]])
-        let context = try XCTUnwrap(contexts["bobbin_computer_use"])
-        XCTAssertEqual(context["kind"], "application")
-        XCTAssertTrue(context["value"]?.contains("mcp__cua_repl") == true)
-        XCTAssertFalse(context["value"]?.contains(thread.systemPrompt) == true)
-        XCTAssertEqual(instructions, (context["value"] ?? "") + "\n\n" + thread.systemPrompt)
     }
 
     @MainActor
-    func testEmptyCustomPromptKeepsComputerUseInstructionsWithoutChangingStoredPrompt() throws {
+    func testComputerUseGuidanceReachesEveryTurnAsApplicationContext() throws {
+        let fixture = try Fixture()
+        defer { fixture.cleanup() }
+        var thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
+        thread.systemPrompt = "Keep replies concise."
+
+        let turn = HarnessController.turnStartParameters(threadID: "codex-thread", text: "hello", thread: thread)
+        let contexts = try XCTUnwrap(turn["additionalContext"] as? [String: [String: String]])
+        let context = try XCTUnwrap(contexts["bobbin_computer_use"])
+        XCTAssertEqual(context["kind"], "application")
+        XCTAssertTrue(context["value"]?.contains("mcp__cua_repl.js") == true)
+        XCTAssertFalse(context["value"]?.contains(thread.systemPrompt) == true)
+        XCTAssertLessThan(context["value"]?.utf8.count ?? .max, 4_000)
+    }
+
+    @MainActor
+    func testWhitespaceOnlySystemPromptIsOmittedFromStartAndResumeParameters() throws {
         let fixture = try Fixture()
         defer { fixture.cleanup() }
         var thread = try fixture.store.createThread(workingDirectory: "/tmp/project")
 
-        var sharedInstructions: String?
         for prompt in ["", " \n\t "] {
             thread.systemPrompt = prompt
             let start = HarnessController.threadStartParameters(for: thread)
-            let instructions = try XCTUnwrap(start["developerInstructions"] as? String)
-            XCTAssertTrue(instructions.contains("mcp__cua_repl"))
-            if let sharedInstructions {
-                XCTAssertEqual(instructions, sharedInstructions)
-            }
-            sharedInstructions = instructions
+            XCTAssertNil(start["developerInstructions"])
 
             let resume = HarnessController.threadResumeParameters(
                 threadID: "codex-thread",
                 thread: thread
             )
-            XCTAssertEqual(resume["developerInstructions"] as? String, instructions)
-            let turn = HarnessController.turnStartParameters(threadID: "codex-thread", text: "hello", thread: thread)
-            let contexts = try XCTUnwrap(turn["additionalContext"] as? [String: [String: String]])
-            XCTAssertEqual(contexts["bobbin_computer_use"]?["kind"], "application")
-            XCTAssertEqual(contexts["bobbin_computer_use"]?["value"], instructions)
-            XCTAssertEqual(thread.systemPrompt, prompt)
+            XCTAssertNil(resume["developerInstructions"])
         }
     }
 

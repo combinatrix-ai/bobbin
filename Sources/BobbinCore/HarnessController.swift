@@ -593,18 +593,10 @@ public final class HarnessController: ObservableObject {
     }
 
     private static let computerUseInstructions = """
-    Computer Use means reading and operating Mac app UIs. The official tool is js in the mcp__cua_repl namespace (mcp__cua_repl.js), exposed directly to you.
-
-    - When the user asks to launch or operate a Mac app's UI, use that native Computer Use tool.
-    - Complete the requested operation. If the UI shows a wrong or intermediate result, correct the input or action and check again while access remains available. Do not end the task by only reporting a recoverable mistake.
-    - Match each control's current label or description to the intended action or value. Do not guess accessibility element numbers.
-    - For text, numbers, or expressions, prefer documented text-entry or keyboard APIs when the app supports them. Enter the requested input verbatim, submit it, and verify the result in the UI.
-    - Call it directly. It is not inside functions.exec and is not in ALL_TOOLS. Do not send CUA code to functions.exec or a shell.
-    - Follow the tool's first-call rule: one entry API call, then read its returned documentation and UI state. For a specified Mac app, use cua.getApp. Use only documented APIs.
-    - Do not use osascript, AppleScript, JXA, System Events, or shell-driven UI automation for that app operation.
-    - Read the target app's UI after the final action and verify the actual outcome before claiming completion. A typed calculator expression alone is not a calculated result.
-    - If the official tool is unavailable or access is refused, stop that UI task and report the reason. Do not switch to another UI automation method.
-    - These UI rules do not restrict shell commands for ordinary file or code tasks.
+    When operating a Mac app UI with mcp__cua_repl.js:
+    - Match controls by their current label or description. Do not guess element numbers.
+    - For text, numbers, or expressions, prefer documented text-entry or keyboard APIs.
+    - After the final action, read the app's UI and verify the outcome. If it is wrong, correct it and check again before reporting.
     """
 
     static func threadStartParameters(for thread: HarnessThread) -> [String: Any] {
@@ -616,7 +608,7 @@ public final class HarnessController: ObservableObject {
             "sandbox": thread.reviewMode.sandboxMode,
             "serviceName": "bobbin"
         ]
-        addDeveloperInstructions(to: &parameters, for: thread)
+        addSystemPromptParameter(to: &parameters, for: thread)
         return parameters
     }
 
@@ -628,24 +620,22 @@ public final class HarnessController: ObservableObject {
         threadID: String,
         thread: HarnessThread
     ) -> [String: Any] {
-        var parameters: [String: Any] = [
+        [
             "threadId": threadID,
             "approvalPolicy": thread.reviewMode.approvalPolicy,
             "approvalsReviewer": thread.reviewMode.approvalsReviewer,
             "sandbox": thread.reviewMode.sandboxMode
         ]
-        addDeveloperInstructions(to: &parameters, for: thread)
-        return parameters
     }
 
-    private static func addDeveloperInstructions(
+    private static func addSystemPromptParameter(
         to parameters: inout [String: Any],
         for thread: HarnessThread
     ) {
-        let hasCustomPrompt = !thread.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        parameters["developerInstructions"] = hasCustomPrompt
-            ? computerUseInstructions + "\n\n" + thread.systemPrompt
-            : computerUseInstructions
+        guard !thread.systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return
+        }
+        parameters["developerInstructions"] = thread.systemPrompt
     }
 
     static func turnStartParameters(
